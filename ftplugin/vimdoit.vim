@@ -1,0 +1,1 @@
+echom "hi from ftplugin"
