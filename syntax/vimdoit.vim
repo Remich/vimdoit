@@ -4,18 +4,26 @@ endif
 
 let b:current_syntax = "vimdoit"
 
+" Section
 syntax match Section "^\===.*===$"
+" Subsection
 syntax match Section "^\---.*--$"
 highlight link Section Identifier
 
+" Subsubsection
+syntax match SubSubSection "#" contained
+highlight link SubSubSection Identifier
+
+" Headings
 syntax match SectionHeading "\v^((\u|\d){1,}(\s|\-)*)+"
+syntax match SectionHeading "\v^#+\s((\u|\d){1,}(\s|\-)*)+" contains=SubSubSection
 highlight link SectionHeading Operator
 
 syntax match ExclamationMark "\v!+"
 highlight link ExclamationMark Tag
 
 syntax match Info "\v(\u|\s)+:"
-highlight link Info Todo
+highlight link Info String
 
 syntax match Code "\v`.*`"
 highlight link Code Comment
