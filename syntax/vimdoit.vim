@@ -34,7 +34,8 @@ syntax match Code "\v`.{-}`"
 highlight link Code Comment
 
 " Strings
-syntax match VimdoitString "\v['"].{-}['"]"
+" syntax match SingleSinglequote "\v[^ \t]\zs'\ze[^ \t]" contained
+syntax match VimdoitString "\v[ \t]\zs['"].{-}['"]\ze[ \t,.!:]" contains=SingleSinglequote
 highlight link VimdoitString String
 
 " Time & Timespan
