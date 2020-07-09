@@ -19,15 +19,13 @@ echom "Plugin vimdoit loaded."
 
 function! s:DataInit()
 	let s:data = {
-				\ 'projectname' : 'foobar',
-				\ 'sections'		: []
+				\ 'name'				: 'Unknown Project',
+				\ 'level'				: 0,
+				\ 'sections'		: [],
 				\	}
 
-	let s:cur_section         = v:null
-	let s:cur_subsection      = v:null
+	let s:data_stack_sections = [ s:data ]
 	let s:cur_task            = v:null
-	let s:cur_section_flag    = v:false
-	let s:cur_subsection_flag = v:false
 	let s:cur_task_flag       = v:false
 endfunction
 
@@ -59,9 +57,9 @@ function! s:DataPrintSection(section, level)
 		call map(a:section['tasks'], 's:DataPrintTask(v:val, l:nextlevel)')	
 	endif
 
-	if len(a:section['subsections']) > 0
-		echom l:padding."Subsections:"
-		call map(a:section['subsections'], 's:DataPrintSection(v:val, l:nextlevel)')	
+	if len(a:section['sections']) > 0
+		echom l:padding."Sections:"
+		call map(a:section['sections'], 's:DataPrintSection(v:val, l:nextlevel)')	
 	endif
 endfunction
 
@@ -86,12 +84,27 @@ endfunction
 " = Data Manipulator =
 " ====================
 
+function! s:DataStackSectionsPush(section)
+	call add(s:data_stack_sections, a:section)
+endfunction
+
+function! s:DataStackSectionsTop()
+	let l:len = len(s:data_stack_sections)
+	return s:data_stack_sections[l:len-1]
+endfunction
+
+function! s:DataStackSectionsPop()
+	let l:len = len(s:data_stack_sections)
+	call remove(s:data_stack_sections, l:len-1)
+endfunction
+
 function! s:DataNewSection(name)
 	let s:section = {
 				\ 'name'        : a:name,
+				\ 'level'				: -1,
 				\ 'start'				: -1,
 				\ 'end'					: -1,
-				\ 'subsections' : [],
+				\ 'sections'	  : [],
 				\ 'tasks'       : [],
 				\ }
 	return s:section	
@@ -106,46 +119,66 @@ function! s:DataNewTask(name, level)
 	return s:task
 endfunction
 
-function! s:DataAddSection(name, start)
-	let s:new = s:DataNewSection(a:name)
-	let s:new["start"] = a:start
-	call add(s:data['sections'], s:new)
-	
-	" add end to previous section
-	if s:cur_section_flag == v:true
-		let s:cur_section['end'] = a:start - 1
+function! s:DataAddSection(name, start, level)
+	let l:new = s:DataNewSection(a:name)
+	let l:new["start"] = a:start
+	let l:new["level"] = a:level
+
+	let l:top = s:DataStackSectionsTop()
+
+	if l:new["level"] > l:top["level"]
+		call add(l:top['sections'], l:new)
+		call s:DataStackSectionsPush(l:new)
+		return
+	endif
+
+	if l:new["level"] <= l:top["level"]
+		
+		while l:top["level"] > l:new["level"] - 1
+			call s:DataStackSectionsPop()
+			let l:top = s:DataStackSectionsTop()
+		endwhile
+
+		call add(l:top['sections'], l:new)
+		call s:DataStackSectionsPush(l:new)
+		return
 	endif
 	
-	" remember current section for faster referencing
-	let s:cur_section         = s:new
-	let s:cur_section_flag    = v:true
-	let s:cur_subsection      = v:null
-	let s:cur_subsection_flag = v:false
 	let s:cur_task            = v:null
 	let s:cur_task_flag       = v:false
 	
-endfunction
-
-function! s:DataAddSubsection(name)
-	let s:new = s:DataNewSection(a:name)
-	call add(s:cur_section['subsections'], s:new)
-	
-	" remember current subsection for faster referencing
-	let s:cur_subsection      = s:new
-	let s:cur_subsection_flag = v:true
-	let s:cur_task            = v:null
-	let s:cur_task_flag       = v:false
 endfunction
 
 " Returns the section with name = `a:name`.
 " If no such section exists, returns an empty list.
 function! s:DataGetSection(name)
-	return filter(copy(s:data['sections']), 'v:val["name"] == "'.a:name.'"')
+	return filter(deepcopy(s:data['sections']), 'v:val["name"] == "'.a:name.'"')
 endfunction
 
-" Wrapper for DataAddSubsection (maintaining code-redability)
-function! s:DataAddSubsubsection(name)
-	call s:DataAddSubsection(a:name)
+function! s:DataGetFirstSection()
+	return s:data['sections'][0]
+endfunction
+
+" Updates the `end` of each Section according to it's successor Section
+function! s:DataUpdateEndOfEachSection(section)
+	
+	let l:prev_section = {}
+	
+	for i in a:section
+		
+		if l:prev_section != {}
+			let l:prev_section['end'] = i['start'] - 1
+		endif
+
+		if l:prev_section != {} && len(l:prev_section['sections']) > 0
+			let l:last_section        = s:DataUpdateEndOfEachSection(l:prev_section['sections'])
+			let l:last_section['end'] = i['start'] - 1
+		endif
+		
+		let l:prev_section = i
+	endfor
+	
+	return l:prev_section
 endfunction
 
 function! s:IsSubTask(t1, t2)
@@ -192,47 +225,51 @@ function! s:DrawComputeOverviewText(sections, text, num, padding)
 	let l:j = 1
 	let l:sep = a:num == "" ? '' : '.'
 	let l:padding = a:padding."	"
+	let l:text = a:text
 	for i in a:sections
 		let l:numstr = a:num.l:sep.l:j
-		call add(a:text, l:padding.l:numstr.'. '.i['name'])
+		call add(l:text, l:padding.l:numstr.'. '.i['name'])
 		" recurse
-		echom " "
-		echom "name: ".i['name']
-		echom i['subsections']
-		if len(i['subsections']) > 0
-			let l:text = s:DrawComputeOverviewText(i['subsections'], a:text, l:numstr, l:padding)
+		if len(i['sections']) > 0
+			let l:text = s:DrawComputeOverviewText(i['sections'], l:text, l:numstr, l:padding)
 		endif
 		let l:j += 1
 	endfor
 
-	return a:text
+	return l:text
 endfunction
 
 function! s:DrawSectionOverview()
 	let l:overview = s:DataGetSection("OVERVIEW")
-	echom l:overview
+	
 	" check if there is already a section 'OVERVIEW' in the document
 	if l:overview == []
-		echom "NO OVERVIEW"
+		" no, just get the drawing position
+		let s:tmp = s:DataGetFirstSection()
+		let l:draw_position = s:tmp['start']-1
+		let l:sections = s:data['sections']
 	else
-		echom "Yes has OVERVIEW"
-		let l:overview = l:overview[0]
+		" yes, delete it
+		let l:overview      = l:overview[0]
+		let l:draw_position = l:overview['start']-1
 		" delete old overview
 		call deletebufline(bufname(), l:overview['start'], l:overview['end'])
-		" insert new overview
-
-		let l:text = [ 
-					\ "==============================================================================", 
-					\ "<OVERVIEW>",
-					\ "",
-					\ ]	
-
-		let l:sections = filter(copy(s:data['sections']), 'v:val["name"] != "OVERVIEW"')
-		let l:text = s:DrawComputeOverviewText(l:sections, l:text, "", "")
-		call add(l:text, "")
-		
-		call append(l:overview['start']-1, l:text)
+		let l:sections = filter(deepcopy(s:data['sections']), 'v:val["name"] != "OVERVIEW"')
 	endif
+	
+	" insert new overview
+
+	let l:text = [ 
+				\ "==============================================================================", 
+				\ "<OVERVIEW>",
+				\ "",
+				\ ]	
+
+	let l:text     = s:DrawComputeOverviewText(l:sections, l:text, "", "")
+	call add(l:text, "")
+	
+	call append(l:draw_position, l:text)
+
 endfunction
 
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -269,17 +306,6 @@ function! s:IsLineSubsectionDelimiter(line)
 	endif
 endfunction
 
-function! s:IsLineSubsubsection(line)
-	let l:pattern = '\v^#+'
-	let l:result = match(a:line, l:pattern)
-	
-	if l:result == -1
-		return v:false
-	else
-		return v:true
-	endif
-endfunction
-
 function! s:IsLineTask(line)
 	let l:pattern = '\v^\s*-\s\[.*\]\s.*$'
 	let l:result  = match(a:line, l:pattern)
@@ -291,7 +317,7 @@ function! s:IsLineTask(line)
 	endif
 endfunction
 
-function! s:ExtractHeading(line)
+function! s:ExtractSectionHeading(line)
 	let l:pattern  = '\v^\t*\<\zs.*\ze\>'
 	let l:heading  = []
 	call substitute(a:line, l:pattern, '\=add(l:heading, submatch(0))', 'g')
@@ -304,17 +330,11 @@ function! s:ExtractHeading(line)
 	return trim(l:heading[0])
 endfunction
 
-function! s:ExtractSubsubsectionHeading(line)
-	let l:pattern  = '\v^#+\s\zs((\u|\d){1,}(\s|\-)*)+\ze'
-	let l:heading  = []
-	call substitute(a:line, l:pattern, '\=add(l:heading, submatch(0))', 'g')
-
-	if l:heading == []
-		throw "ERROR: Heading not found!"
-		return
-	endif
-	
-	return trim(l:heading[0])
+function! s:ExtractSectionLevel(line)
+	let l:pattern = '\v\zs\s*\ze[^\s]'
+	let l:tabs    = []
+	call substitute(a:line, l:pattern, '\=add(l:tabs, submatch(0))', 'g')
+	return strlen(l:tabs[0])
 endfunction
 
 function! s:ExtractTaskName(line)
@@ -360,8 +380,9 @@ function! s:ParseProjectFile()
 			" is line a Section Delimiter?
 			if s:IsLineSectionDelimiter(l:line) == v:true
 				" yes: then next line contains the Section Heading
-				let l:section_name  = s:ExtractHeading(getline(l:i+1))
-				call s:DataAddSection(l:section_name, l:i)
+				let l:section_name  = s:ExtractSectionHeading(getline(l:i+1))
+				let l:section_level = 1
+				call s:DataAddSection(l:section_name, l:i, section_level)
 				
 				let l:i += 2
 				continue
@@ -370,23 +391,14 @@ function! s:ParseProjectFile()
 			" is line a Subsection Delimiter?
 			if s:IsLineSubsectionDelimiter(l:line) == v:true
 				" yes: then next line contains the Section Heading
-				let l:section_name = s:ExtractHeading(getline(l:i+1))
-				call s:DataAddSubsection(l:section_name)
-
+				let l:section_name  = s:ExtractSectionHeading(getline(l:i+1))
+				let l:section_level = 2 + s:ExtractSectionLevel(getline(l:i+1))
+				call s:DataAddSection(l:section_name, l:i, section_level)
+				
 				let l:i += 2
 				continue
 			endif
-
-			" is line a SubSubSection?
-			" if s:IsLineSubsubsection(l:line) == v:true
-			" 	" yes: then next line contains the Section Heading
-			" 	let l:section_name = s:ExtractSubsubsectionHeading(l:line)
-			" 	call s:DataAddSubsubsection(l:section_name)
-      "
-			" 	let l:i += 1
-			" 	continue
-			" endif
-
+			
 			" is line a Task?	
 			" if s:IsLineTask(l:line) == v:true
 			" 	let l:task_name  = s:ExtractTaskName(l:line)
@@ -400,19 +412,15 @@ function! s:ParseProjectFile()
 			let l:i += 1
 		endwhile
 
-		" add end to last section
-		if s:cur_section_flag == v:true
-			let s:cur_section['end'] = line('$')
-		endif
+		let l:last_section        = s:DataUpdateEndOfEachSection(s:data["sections"])
+		let l:last_section['end'] = line('$')
 
-		echom " after while"
+		call s:DrawSectionOverview()
 	
 	catch
 		echom "vimdoit:  Exception  in ".v:throwpoint.":"
 		echom "   ".v:exception	
 	endtry
-
-	call s:DrawSectionOverview()
 
 	" call s:DataPrint()
 
