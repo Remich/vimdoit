@@ -71,12 +71,16 @@ syntax match FlagWaiting "\v-waiting\=block#\d+" contained
 syntax match FlagWaiting "\v-waiting\=\d{4}-\d{2}-\d{2}" contained
 highlight link FlagWaiting String
 
-" Flag In-Progress ('-in-progress')
-syntax match FlagInProgress "\v-in-progress" contained
+" Flag ordinary tag ('#SOMESTRING')
+syntax match FlagTag "\v#[^ \t]*" contained
+highlight link FlagTag Identifier
+
+" Flag In-Progress special tag ('#in-progress')
+syntax match FlagInProgress "\v#in-progress" contained
 highlight link FlagInProgress Identifier
 	
 " Flag Region
-syntax region FlagRegion start="\v\s--\s" end="$" contains=Flag,FlagDelimiter,FlagBlock,FlagWaiting,FlagInProgress,FlagSprint
+syntax region FlagRegion start="\v\s--\s" end="$" contains=Flag,FlagDelimiter,FlagBlock,FlagWaiting,FlagInProgress,FlagSprint,FlagTag
 highlight link FlagRegion NerdTreeDir
 
 " Task (not used)
@@ -107,3 +111,11 @@ highlight link TaskDueToday Error
 " Task overdue
 syntax match TaskOverdue "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*-overdue" contains=ExclamationMark,Info,Appointment
 highlight link TaskOverdue Error
+
+
+" syntax match Test "\v^(\t)+.*\n*\1{2}.*"
+" using 'External matches'
+" ISSUES: {2,) only matches twice as many, what about 1.5 as many?
+" ISSUES: am I wasting my time? is this possible with regexes?
+syntax region Test start="\v^\z(\t{1})\zs\z(\.+)" skip="\v\z1+" end="\v\ze^[^\z2]"
+highlight link Test Comment
