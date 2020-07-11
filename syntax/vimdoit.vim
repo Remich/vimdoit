@@ -17,7 +17,7 @@ highlight link Section Identifier
 syntax match SectionHeadingDelimiter "\v\<" contained conceal
 syntax match SectionHeadingDelimiter "\v\>" contained conceal
 syntax match SectionHeading "\v^\t*\<.*\>" contains=SectionHeadingDelimiter
-syntax match SectionHeadingFlagRegion "\v\t*\<.*\>.*$" contains=Flag,FlagDelimiter,FlagBlock,FlagWaiting,FlagInProgress,FlagSprint,SectionHeading
+syntax match SectionHeadingFlagRegion "\v\t*\<.*\>.*$" contains=Flag,FlagDelimiter,FlagBlock,FlagWaiting,FlagInProgress,FlagSprint,FlagTag,SectionHeading
 highlight link SectionHeading Operator
 highlight link SectionHeadingDelimiter Comment
 
@@ -57,7 +57,7 @@ syntax match FlagDelimiter "\v\s--\s" contained
 highlight link FlagDelimiter Comment
 
 " Flag Normal ('-flag')
-syntax match Flag "\v\zs-.*ze\s" contained
+syntax match Flag "\v\zs-.*\ze\s" contained
 highlight link Flag Comment
 
 " Flag Sprint ('@sprint')
@@ -79,10 +79,6 @@ highlight link FlagWaiting String
 " Flag ordinary tag ('#SOMESTRING')
 syntax match FlagTag "\v#[^ \t]*" contained
 highlight link FlagTag Identifier
-
-" Flag In-Progress special tag ('#in-progress')
-syntax match FlagInProgress "\v#in-progress" contained
-highlight link FlagInProgress Identifier
 
 " Flag Region
 syntax region FlagRegion start="\v\s--\s" end="$" contains=Flag,FlagDelimiter,FlagBlock,FlagWaiting,FlagInProgress,FlagSprint,FlagTag
