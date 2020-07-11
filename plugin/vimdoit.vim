@@ -26,6 +26,7 @@ function! s:DataInit()
 				\ 'level'		 : 0,
 				\ 'sections' : [],
 				\ 'tasks'		 : [],
+				\ 'flags'		 : [],
 				\	}
 	
 	" A stack to keep track of the nesting of (sub-)sections.
@@ -151,15 +152,16 @@ endfunction
 " = Datastructure: Tree =
 " =======================
 
-function! s:DataNewSection(name, start, level)
+function! s:DataNewSection(name)
 	let s:section = {
 				\ 'name'        : a:name,
-				\ 'start'				: a:start,
-				\ 'level'				: a:level,
+				\ 'start'				: -1,
+				\ 'level'				: -1,
 				\ 'end'					: -1,
 				\ 'progress'		: 0,
 				\ 'sections'	  : [],
 				\ 'tasks'       : [],
+				\ 'flags'				: [],
 				\ }
 	return s:section	
 endfunction
@@ -188,9 +190,17 @@ function! s:DataNewNote(name, linenum, level)
 	return s:note
 endfunction
 
-function! s:DataAddSection(name, start, level)
+function! s:DataSetProject(name, flags)
+	let s:project_tree['name']  = a:name
+	let s:project_tree['flags'] = a:flags
+endfunction
+
+function! s:DataAddSection(name, start, level, flags)
 	" create new section object
-	let l:new = s:DataNewSection(a:name, a:start, a:level)
+	let l:new = s:DataNewSection(a:name)
+	let l:new['start'] = a:start
+	let l:new['level'] = a:level
+	let l:new['flags'] = a:flags
 	" update sections stack according to level	
 	call s:DataStackUpdate(s:sections_stack, l:new["level"])
 	" add section as child
@@ -469,6 +479,14 @@ function! s:IsLineNote(line)
 	endif
 endfunction
 
+function! s:ExtractProjectName(line)
+	return s:ExtractSectionHeading(getline(a:line))
+endfunction
+
+function! s:ExtractProjectFlags(line)
+	return s:ExtractSectionHeadingFlags(getline(a:line))
+endfunction
+
 function! s:ExtractSectionHeading(line)
 	let l:pattern  = '\v^\t*\<\zs.*\ze\>'
 	let l:heading  = []
@@ -514,6 +532,101 @@ function! s:ExtractNoteLevel(line)
 	return s:ExtractTaskLevel(a:line)	
 endfunction
 
+function! s:ExtractFlagsFromFlagRegion(region)
+
+	let l:line = a:region
+	
+	let l:flags = {
+				\ 'normal'				: [],
+				\ 'sprint'				: [],
+				\ 'block'					: [],
+				\ 'waiting_block' : [],
+				\ 'waiting_date'	: [],
+				\ 'tag'						: [],
+				\	}
+
+	" extract sprint flags ('@sprint')
+	let l:pattern = '\v\@[^ \t]+'
+	let l:normal    = []
+	call substitute(l:line, l:pattern, '\=add(l:flags["sprint"], submatch(0))', 'g')
+	let l:line = substitute(l:line, l:pattern, '', 'g')
+	
+	" extract block flags ('-block#42')
+	let l:pattern = '\v-block#\d+'
+	let l:normal    = []
+	call substitute(l:line, l:pattern, '\=add(l:flags["block"], submatch(0))', 'g')
+	let l:line = substitute(l:line, l:pattern, '', 'g')
+	
+	" extract waiting for block flags ('-waiting=block#23')
+	let l:pattern = '\v-waiting\=block#\d+'
+	let l:normal    = []
+	call substitute(l:line, l:pattern, '\=add(l:flags["waiting_block"], submatch(0))', 'g')
+	let l:line = substitute(l:line, l:pattern, '', 'g')
+	
+	" extract waiting for date flags ('-waiting=2020-07-08')
+	let l:pattern = '\v-waiting\=\d{4}-\d{2}-\d{2}'
+	let l:normal    = []
+	call substitute(l:line, l:pattern, '\=add(l:flags["waiting_date"], submatch(0))', 'g')
+	let l:line = substitute(l:line, l:pattern, '', 'g')
+	
+	"extract flag ordinary tag ('#tag')
+	let l:pattern = '\v#[^ \t]*'
+	let l:normal    = []
+	call substitute(l:line, l:pattern, '\=add(l:flags["tag"], submatch(0))', 'g')
+	let l:line = substitute(l:line, l:pattern, '', 'g')
+	
+	" extract normal flag ('-flag')
+	let l:pattern = '\v-[^ \t]+'
+	let l:normal    = []
+	call substitute(l:line, l:pattern, '\=add(l:flags["normal"], submatch(0))', 'g')
+	let l:line = substitute(l:line, l:pattern, '', 'g')
+
+	return l:flags
+	
+endfunction
+
+function! s:ExtractSectionHeadingFlags(line)
+	
+	" remove section heading
+	" everything remaining is the flag region
+	let l:line = substitute(a:line, '\v^.*\>', '', '') 
+
+	" no flags
+	if strlen(trim(l:line)) == 0
+		return
+	endif
+
+	" extract them
+	return s:ExtractFlagsFromFlagRegion(l:line)
+endfunction
+
+function! s:ExtractTaskFlags(line)
+
+	" does the task have any flags?
+	if s:HasTaskFlags(a:line) == v:false
+		return []
+	endif
+	
+	" remove everything which is not the flag region
+	let l:line = substitute(a:line, '\v^.*--\s', '', '') 
+
+	" extract them
+	return s:ExtractFlagsFromFlagRegion(l:line)
+endfunction
+
+function! s:ExtractNoteFlags(line)
+	return s:ExtractTaskFlags(a:line)
+endfunction
+
+function! s:HasTaskFlags(line)
+	let l:pattern = '\v\s--\s'
+	if match(a:line, l:pattern) == -1
+		return v:false
+	else
+		return v:true
+	endif
+endfunction
+
 function! s:IsTaskDone(linenum)
 	let l:line = getline(a:linenum)
 	let l:pattern = '\v\s*-\s\[x\]\s.*$'
@@ -550,12 +663,23 @@ function! s:ParseProjectFile()
 				continue
 			endif
 
+			" is this the first line?
+			if l:i == 1
+				let l:project_name  = s:ExtractProjectName(l:i)
+				let l:project_flags = s:ExtractProjectFlags(l:i)
+				call s:DataSetProject(l:project_name, l:project_flags)
+				
+				let l:i += 1
+				continue
+			endif
+
 			" is line a Section Delimiter?
 			if s:IsLineSectionDelimiter(l:line) == v:true
 				" yes: then next line contains the Section Heading
 				let l:section_name  = s:ExtractSectionHeading(getline(l:i+1))
 				let l:section_level = 1
-				call s:DataAddSection(l:section_name, l:i, section_level)
+				let l:flags         = s:ExtractSectionHeadingFlags(getline(l:i+1))
+				call s:DataAddSection(l:section_name, l:i, section_level, l:flags)
 				
 				let l:i += 2
 				continue
@@ -566,7 +690,8 @@ function! s:ParseProjectFile()
 				" yes: then next line contains the Section Heading
 				let l:section_name  = s:ExtractSectionHeading(getline(l:i+1))
 				let l:section_level = 2 + s:ExtractSectionLevel(getline(l:i+1))
-				call s:DataAddSection(l:section_name, l:i, section_level)
+				let l:flags         = s:ExtractSectionHeadingFlags(getline(l:i+1))
+				call s:DataAddSection(l:section_name, l:i, section_level, flags)
 				
 				let l:i += 2
 				continue
@@ -574,8 +699,9 @@ function! s:ParseProjectFile()
 			
 			" is line a Task?	
 			if s:IsLineTask(l:line) == v:true
-				let l:task_name   = s:ExtractTaskName(l:line)
-				let l:task_level  = s:ExtractTaskLevel(l:line)
+				let l:task_name  = s:ExtractTaskName(l:line)
+				let l:task_level = s:ExtractTaskLevel(l:line)
+				let l:flags      = s:ExtractTaskFlags(l:line)
 				call s:DataAddTask(l:task_name, l:i, l:task_level)
 
 				let l:i += 1
@@ -586,6 +712,7 @@ function! s:ParseProjectFile()
 			if s:IsLineNote(l:line) == v:true
 				let l:note_name   = s:ExtractNoteName(l:line)
 				let l:note_level  = s:ExtractNoteLevel(l:line)
+				let l:flags				= s:ExtractNoteFlags(l:line)
 				call s:DataAddNote(l:note_name, l:i, l:note_level)
 			endif
 
@@ -603,8 +730,6 @@ function! s:ParseProjectFile()
 		echom "vimdoit:  Exception  in ".v:throwpoint.":"
 		echom "   ".v:exception	
 	endtry
-
-	" echom s:project_tree
 
 endfunction
 
