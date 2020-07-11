@@ -21,6 +21,11 @@ syntax match SectionHeadingFlagRegion "\v\t*\<.*\>.*$" contains=Flag,FlagDelimit
 highlight link SectionHeading Operator
 highlight link SectionHeadingDelimiter Comment
 
+
+" Percentages
+syntax match Percentages "\v\[.*\%\]"
+highlight link Percentages Comment
+
 " Exclamation Mark
 syntax match ExclamationMark "\v!+"
 highlight link ExclamationMark Tag
