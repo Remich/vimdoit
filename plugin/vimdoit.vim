@@ -166,14 +166,26 @@ endfunction
 
 function! s:DataNewTask(name, linenum, level)
 	let s:task = {	
+				\ 'type'		 : 'task',
 				\ 'name'	 	 : a:name,
 				\ 'linenum'	 : a:linenum,
 				\ 'level'		 : a:level,
 				\ 'done'		 : 0,
-				\ 'progress' : 0,
 				\ 'tasks'		 : []
 				\ }
 	return s:task
+endfunction
+
+" Notes are speciel types of tasks.
+function! s:DataNewNote(name, linenum, level)
+	let s:note = {	
+				\ 'type'		 : 'note',
+				\ 'name'	 	 : a:name,
+				\ 'linenum'	 : a:linenum,
+				\ 'level'		 : a:level,
+				\ 'tasks'		 : []
+				\ }
+	return s:note
 endfunction
 
 function! s:DataAddSection(name, start, level)
@@ -257,6 +269,26 @@ function! s:DataAddTask(name, linenum, level)
 	call s:DataStackPush(s:tasks_stack, l:new)
 endfunction
 
+function! s:DataAddNote(name, linenum, level)
+	
+	let l:new = s:DataNewNote(a:name, a:linenum, a:level)	
+
+	" update tasks stack according to level	
+	call s:DataStackUpdate(s:tasks_stack, l:new["level"])
+	
+	" decide where to add task to (current section or current tasks)
+	if len(s:tasks_stack) == 0
+		let l:top = s:DataStackTop(s:sections_stack)
+	else
+		let l:top = s:DataStackTop(s:tasks_stack)
+	endif
+	
+	call add(l:top['tasks'], l:new)
+
+	" add task as top of `s:task_stack`
+	call s:DataStackPush(s:tasks_stack, l:new)
+endfunction
+
 
 " =========================================
 " = Methods for computing additional data =
@@ -292,17 +324,22 @@ function! s:GetInfoAllSubsections(section, info)
 endfunction
 
 function! s:GetInfoAllSubtasks(task, info, parent)
-	
-	let a:info['num']	+= 1
-	
-	if a:parent == v:false
-		" parent task is not done, check if current task is done
-		let a:info['done'] += a:task['done'] == v:true ? 1 : 0
-		let l:parent = a:task['done']
+
+	"skip notes
+	if a:task['type'] == 'task'
+		let a:info['num']	+= 1
+		
+		if a:parent == v:false
+			" parent task is not done, check if current task is done
+			let a:info['done'] += a:task['done'] == v:true ? 1 : 0
+			let l:parent = a:task['done']
+		else
+			" parent task is done, therefore this task is also done
+			let a:info['done'] += 1
+			let l:parent = v:true
+		endif
 	else
-		" parent task is done, therefore this task is also done
-		let a:info['done'] += 1
-		let l:parent = v:true
+		let l:parent = a:parent		
 	endif
 	
 	for i in a:task['tasks']
@@ -421,6 +458,17 @@ function! s:IsLineTask(line)
 	endif
 endfunction
 
+function! s:IsLineNote(line)
+	let l:pattern = '\v^\s*-\s.*$'
+	let l:result  = match(a:line, l:pattern)
+	
+	if l:result == -1
+		return v:false
+	else
+		return v:true
+	endif
+endfunction
+
 function! s:ExtractSectionHeading(line)
 	let l:pattern  = '\v^\t*\<\zs.*\ze\>'
 	let l:heading  = []
@@ -448,11 +496,22 @@ function! s:ExtractTaskName(line)
 	return trim(l:task[0])
 endfunction
 
+function! s:ExtractNoteName(line)
+	let l:pattern = '\v\s*-\s\zs.*\ze((--)|$)'
+	let l:note    = []
+	call substitute(a:line, l:pattern, '\=add(l:note, submatch(0))', 'g')
+	return trim(l:note[0])
+endfunction
+
 function! s:ExtractTaskLevel(line)
 	let l:pattern = '\v\zs\s*\ze-'
 	let l:tabs    = []
 	call substitute(a:line, l:pattern, '\=add(l:tabs, submatch(0))', 'g')
 	return strlen(l:tabs[0])
+endfunction
+
+function! s:ExtractNoteLevel(line)
+	return s:ExtractTaskLevel(a:line)	
 endfunction
 
 function! s:IsTaskDone(linenum)
@@ -523,6 +582,13 @@ function! s:ParseProjectFile()
 				continue
 			endif
 			
+			" is line a Note?	
+			if s:IsLineNote(l:line) == v:true
+				let l:note_name   = s:ExtractNoteName(l:line)
+				let l:note_level  = s:ExtractNoteLevel(l:line)
+				call s:DataAddNote(l:note_name, l:i, l:note_level)
+			endif
+
 			let l:i += 1
 		endwhile
 
