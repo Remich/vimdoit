@@ -40,7 +40,7 @@ highlight link Code Comment
 
 " Strings
 " syntax match SingleSinglequote "\v[^ \t]\zs'\ze[^ \t]" contained
-syntax match VimdoitString "\v[ \t]\zs['"].{-}['"]\ze[ \t,.!:]" contains=SingleSinglequote
+syntax match VimdoitString "\v[ \t]\zs['"].{-}['"]\ze[ \t,.!:\n]" contains=SingleSinglequote
 highlight link VimdoitString String
 
 " Time & Timespan
