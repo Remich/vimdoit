@@ -164,11 +164,10 @@ function! s:DataNewSection(name, start, level)
 	return s:section	
 endfunction
 
-" TODO rename `line` to `linenum`
-function! s:DataNewTask(name, line, level)
+function! s:DataNewTask(name, linenum, level)
 	let s:task = {	
 				\ 'name'	 	 : a:name,
-				\ 'line'		 : a:line,
+				\ 'linenum'	 : a:linenum,
 				\ 'level'		 : a:level,
 				\ 'done'		 : 0,
 				\ 'progress' : 0,
@@ -237,6 +236,7 @@ function! s:IsSubTask(t1, t2)
 endfunction
 
 function! s:DataAddTask(name, linenum, level)
+	
 	let l:new = s:DataNewTask(a:name, a:linenum, a:level)	
 	
 	let l:new['done'] = s:IsTaskDone(a:linenum)
@@ -515,7 +515,6 @@ function! s:ParseProjectFile()
 			
 			" is line a Task?	
 			if s:IsLineTask(l:line) == v:true
-				" TODO move into `s:DataAddTask`
 				let l:task_name   = s:ExtractTaskName(l:line)
 				let l:task_level  = s:ExtractTaskLevel(l:line)
 				call s:DataAddTask(l:task_name, l:i, l:task_level)
