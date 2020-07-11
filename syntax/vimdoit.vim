@@ -90,6 +90,8 @@ highlight link FlagRegion NerdTreeDir
 
 " Task (not used)
 " syntax region Task start="\v\s*-\s\[.*\]\s\zs" end="\ze\s--" end="$" contains=ExclamationMark,Info
+" te
+"
 " highlight link Task Ignore
 
 
@@ -115,19 +117,19 @@ syntax match TaskOverdue "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*-overdue" contains=E
 highlight link TaskOverdue Error
 
 " Task Done, also all of it's subtasks.
-syntax region Test start="\v^\t{0}- \[x\]+" skip="\v^\t{1,}" end="^"
-syntax region Test start="\v^\t{1}- \[x\]+" skip="\v^\t{2,}" end="^"
-syntax region Test start="\v^\t{2}- \[x\]+" skip="\v^\t{3,}" end="^"
-syntax region Test start="\v^\t{3}- \[x\]+" skip="\v^\t{4,}" end="^"
-syntax region Test start="\v^\t{4}- \[x\]+" skip="\v^\t{5,}" end="^"
-syntax region Test start="\v^\t{5}- \[x\]+" skip="\v^\t{6,}" end="^"
-syntax region Test start="\v^\t{6}- \[x\]+" skip="\v^\t{7,}" end="^"
-syntax region Test start="\v^\t{7}- \[x\]+" skip="\v^\t{8,}" end="^"
-syntax region Test start="\v^\t{8}- \[x\]+" skip="\v^\t{9,}" end="^"
-syntax region Test start="\v^\t{9}- \[x\]+" skip="\v^\t{10,}" end="^"
-syntax region Test start="\v^\t{10}- \[x\]+" skip="\v^\t{11,}" end="^"
-syntax region Test start="\v^\t{11}- \[x\]+" skip="\v^\t{12,}" end="^"
-syntax region Test start="\v^\t{12}- \[x\]+" skip="\v^\t{13,}" end="^"
-syntax region Test start="\v^\t{13}- \[x\]+" skip="\v^\t{14,}" end="^"
-syntax region Test start="\v^\t{14}- \[x\]+" skip="\v^\t{15,}" end="^"
-highlight link Test NerdTreeDir
+syntax region TaskDone start="\v^\t{0}- \[x\]+" skip="\v^\t{1,}" end="^"
+syntax region TaskDone start="\v^\t{1}- \[x\]+" skip="\v^\t{2,}" end="^"
+syntax region TaskDone start="\v^\t{2}- \[x\]+" skip="\v^\t{3,}" end="^"
+syntax region TaskDone start="\v^\t{3}- \[x\]+" skip="\v^\t{4,}" end="^"
+syntax region TaskDone start="\v^\t{4}- \[x\]+" skip="\v^\t{5,}" end="^"
+syntax region TaskDone start="\v^\t{5}- \[x\]+" skip="\v^\t{6,}" end="^"
+syntax region TaskDone start="\v^\t{6}- \[x\]+" skip="\v^\t{7,}" end="^"
+syntax region TaskDone start="\v^\t{7}- \[x\]+" skip="\v^\t{8,}" end="^"
+syntax region TaskDone start="\v^\t{8}- \[x\]+" skip="\v^\t{9,}" end="^"
+syntax region TaskDone start="\v^\t{9}- \[x\]+" skip="\v^\t{10,}" end="^"
+syntax region TaskDone start="\v^\t{10}- \[x\]+" skip="\v^\t{11,}" end="^"
+syntax region TaskDone start="\v^\t{11}- \[x\]+" skip="\v^\t{12,}" end="^"
+syntax region TaskDone start="\v^\t{12}- \[x\]+" skip="\v^\t{13,}" end="^"
+syntax region TaskDone start="\v^\t{13}- \[x\]+" skip="\v^\t{14,}" end="^"
+syntax region TaskDone start="\v^\t{14}- \[x\]+" skip="\v^\t{15,}" end="^"
+highlight link TaskDone NerdTreeDir
