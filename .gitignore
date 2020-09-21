@@ -3,3 +3,4 @@
 .*swo
 tags
 Session.vim
+node_modules/**
