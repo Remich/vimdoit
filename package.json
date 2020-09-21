@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "json2md": "^1.7.1",
+    "minimist": "^1.2.5",
+    "node-jq": "^1.11.1",
+    "sqlite3": "^5.0.0"
+  }
+}
