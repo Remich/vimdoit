@@ -11,25 +11,12 @@ endif
 let s:save_cpo = &cpo
 set cpo&vim
 
-echom "Plugin vimdoit loaded."
-
 " TODO better way
 let g:plugindir = '/home/pepe/software/vimdoit'
 
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-"																Database Interface 												 "
+"																Writing Zettels   												 "
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-
-function! s:DBGet(query)
-	return system('node '.g:plugindir.'/src/idb.js -g '.shellescape(a:query))
-endfunction
-
-function! s:DBRun(query)
-	let l:ret = system('node '.g:plugindir.'/src/idb.js -r '.shellescape(a:query))
-	if trim(l:ret) != ""
-		echom l:ret
-	endif
-endfunction
 
 function! s:GetAllProjects(dir)
 	let l:cwd = getcwd()
@@ -158,9 +145,9 @@ function! s:DataSaveJSON()
 	endif
 endfunction
 	
-" =================
-" = Data Printer =
-" =================
+" ========================
+" = Data Printer (Debug) =
+" ========================
 
 function! s:DataGetPadding(level)
 	let l:r = range(a:level)
@@ -660,6 +647,34 @@ function! s:DataAddFlag(flag, linenum)
 	call setline(a:linenum, l:line.' '.a:flag)
 endfunction
 
+function! s:GenerateID()
+	return trim(system('date "+%s%N" | sha256sum')[0:7])
+endfunction
+
+function! s:NewID()	
+	" save grep command of user
+	let l:grep_save = &grepprg
+	set grepprg=rg\ --vimgrep
+	
+	let l:id = s:GenerateID()
+	
+	" check if ID is already in use
+	silent execute "grep! '0x".l:id."'" 
+	let l:qf = getqflist()
+	while len(l:qf) > 0 " yes, generate new ID
+		let l:id = s:GenerateID()
+		silent execute "grep! '0x".l:id."'" 
+		let l:qf = getqflist()
+	endwhile
+	
+	" restore grep command of user
+	let &grepprg=l:grep_save
+
+	return l:id
+endfunction
+
+command! -nargs=? NewID	:call s:NewID()
+
 function! s:DataAddID(ref)
 
 	" `a:ref` is a section, therefore it has no `linenum` but `start` and `end`
@@ -669,10 +684,9 @@ function! s:DataAddID(ref)
 		let l:linenum = a:ref['linenum']
 	endif
 	
-	" get currrent UNIX timestamp concatenated with current nanoseconds
-	let l:id				= trim(system('date "+%s%N"'))
+	let l:id				= s:NewID()
 	let a:ref['id'] = l:id
-	let l:id				= '-id='.l:id
+	let l:id				= '0x'.l:id
 
 	" actual adding of ID
 	call s:DataAddFlag(l:id, l:linenum)
@@ -719,7 +733,7 @@ function! s:DataFindChanges()
 endfunction
 
 function! s:DataGetIDOfLine(line)
-	let l:pattern = '\v-id\=([^ \t]+)'
+	let l:pattern = '\v0x(\x{8})'
 	let l:id    = []
 	call substitute(a:line, l:pattern, '\=add(l:id, submatch(1))', 'g')
 	
@@ -731,12 +745,20 @@ function! s:DataGetIDOfLine(line)
 endfunction
 
 function! s:DataUpdateReferences()
-	
+
+	"save cursor
+	let l:save_buffer = bufname()
+	let l:save_cursor = getcurpos()
+
+	" save grep command of user
+	let l:grep_save = &grepprg
+	set grepprg=rg\ --vimgrep
+
 	call s:DataCheckIDs()
 	let l:changedlines = s:DataFindChanges()
-
-	" write file
-	execute "write"
+	
+	"write
+	execute "write!"
 
 	for i in l:changedlines
 		let l:line = getline(i)
@@ -749,84 +771,45 @@ function! s:DataUpdateReferences()
 			continue
 		endif
 		
-		let l:results = system('rg -n "'.l:id.'" | cut -d: -f1-2')
-		let l:results = split(l:results)
+		" grep for id
+		silent execute "grep! '0x".l:id."'" 
+		let l:qf = getqflist()
 
-		for j in l:results
-			let l:tmp = split(j, ":")
-			let l:cmd = "sed -i '".l:tmp[1]."s/.*/".l:line."/' ".l:tmp[0]
-			call system(l:cmd)
+		" no external references: continue
+		if len(l:qf) == 0
+			continue
+		endif
+
+		" change lines
+		for entry in l:qf
+			execute 'buffer '.entry['bufnr']
+			
+			" make sure that the indendation is correct
+			let l:level = s:ExtractTaskLevel(getline(entry['lnum']))
+			let l:padding = ""
+			for k in range(l:level)
+				let l:padding .= "	"
+			endfor
+			
+			call setline(entry['lnum'], l:padding."".trim(l:line))
+			
+			execute 'update'
 		endfor
+		
+		execute 'update'
 		
 	endfor
 
-	execute "checktime"
-	" bufdo "e!"
-	execute "edit!"
-endfunction
-
-function! s:DataUpdateDBTask(task)
-	" has task an id?
-	if a:task['id'] == -1
-		" no: insert
-		let l:query = 'INSERT INTO tasks (type, name, date_creation, done) VALUES ("'.a:task["type"].'", "'.a:task["name"].'", datetime(''now''), "'.a:task["done"].'")'
-		let l:res   = s:DBRun(l:query)
-	else
-		" TODO
-		" yes: update
-	endif
-
-	for t in a:task['tasks']
-		call s:DataUpdateDBTask(t)
-	endfor
+	execute "update!"
 	
-endfunction
+	" restore grep command of user
+	let &grepprg=l:grep_save
 
-function! s:DataUpdateDBSection(section)
+	" restore buffer
+	execute "buffer ".l:save_buffer
 	
-	" has section an id?
-	if a:section['id'] == -1
-		" no: insert
-		let l:query = 'INSERT INTO sections (name) VALUES ("'.a:section["name"].'")'
-		let l:res   = s:DBRun(l:query)
-	else
-		" TODO
-		" yes: update
-	endif
-
-	for t in a:section['tasks']
-		call s:DataUpdateDBTask(t)
-	endfor
-	
-	for s in a:section['sections']
-		call s:DataUpdateDBSection(s)
-	endfor
-	
-endfunction
-
-function! s:DataUpdateDB()
-	echom "Updating Database…"
-	return
-	
-	" has project an id?
-	if s:project_tree['id'] == -1
-		" no: insert into database
-		let l:query = 'INSERT INTO projects (name) VALUES ("'.s:project_tree['name'].'")'
-		let l:res   = s:DBRun(l:query)
-	else
-		"TODO
-		" yes: update title or flags
-	endif
-
-	" update tasks
-	for t in s:project_tree['tasks']
-		call s:DataUpdateDBTask(t)
-	endfor
-	
-	" update sections
-	for s in s:project_tree['sections']
-		call s:DataUpdateDBSection(s)
-	endfor
+	" restore cursor
+	call setpos('.', l:save_cursor)
 endfunction
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -1097,15 +1080,12 @@ function! s:ExtractFlagsFromFlagRegion(region)
 	call substitute(l:line, l:pattern, '\=add(l:flags["waiting_date"], submatch(0))', 'g')
 	let l:line = substitute(l:line, l:pattern, '', 'g')
 	
-	" extract id flag ('-id=2309204023')
-	let l:pattern = '\v-id\=[^ \t]+'
-	" TODO remove; also anywhere else?
-	let l:id    = []
-	call substitute(l:line, l:pattern, '\=add(l:flags["id"], submatch(0))', 'g')
+	" extract id flag ('0xa3c922ba')
+	let l:pattern = '\v0x(\x{8})'
+	let l:id = []
+	call substitute(l:line, l:pattern, '\=add(l:id, submatch(1))', 'g')
+	let l:flags["id"] = l:id[0]
 	let l:line = substitute(l:line, l:pattern, '', 'g')
-	if len(l:flags["id"]) != 0
-		let l:flags["id"] = substitute(l:flags["id"][0], '\v-id\=', '', 'g')
-	endif
 	
 	"extract flag ordinary tag ('#tag')
 	let l:pattern = '\v#[^ \t]*'
@@ -1291,10 +1271,8 @@ function! s:AfterProjectChange()
 		
 		call s:ParseProjectFile()
 		call s:DataUpdateReferences()
-		" yes again
-		call s:ParseProjectFile()
+		call s:ParseProjectFile() " yes again
 		call s:DataComputeProgress()
-		" TODO: outsource draw to javascript
 		call s:DrawSectionOverview()
 		call s:DrawProjectStatistics()
 		" call s:DataSaveJSON()

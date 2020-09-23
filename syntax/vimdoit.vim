@@ -82,8 +82,8 @@ syntax match FlagWaiting "\v\~\d+" contained
 syntax match FlagWaiting "\v-waiting\=\d{4}-\d{2}-\d{2}" contained
 highlight link FlagWaiting String
 
-" Flag ID ('-id=2323234234')
-syntax match FlagID "\v-id\=[^ \t]+" contained conceal
+" Flag ID ('0x8c3d19d5')
+syntax match FlagID "\v0x\x{8}" contained conceal
 highlight link FlagID NerdTreeDir
 
 " Flag ordinary tag ('#SOMESTRING')
