@@ -23,6 +23,7 @@ syntax match SectionHeadlineDelimiter "\v\>" contained conceal
 syntax match SectionHeadline "\v^\t*\zs\<[^\>]*\>\ze" contains=SectionHeadlineDelimiter
 highlight link SectionHeadline Operator
 highlight link SectionHeadlineDelimiter Comment
+syntax region FlagRegionHeadline start="\v^\t*\<[^\>]*\>" end="$" contains=Flag,FlagDelimiter,FlagBlock,FlagWaiting,FlagInProgress,FlagSprint,FlagTag,FlagID,SectionHeadline
 
 " Percentages
 syntax match Percentages "\v\[.*\%\]"
@@ -52,6 +53,10 @@ syntax match Appointment "\v\{.*\}"
 " syntax match Appointment "\v\<\d{4}-\d{2}-\d{2} \d{2}:\d{2}\>"
 highlight link Appointment Constant
 
+" Inner Headline
+syntax match InnerHeadline "\v^\s*\(.*\)"
+highlight link InnerHeadline Orange
+
 " URLs
 syntax match URL `\v<(((https?|ftp|gopher)://|(mailto|file|news):)[^' 	<>"]+|(www|web|w3)[a-z0-9_-]*\.[a-z0-9._-]+\.[^' 	<>"]+)[a-zA-Z0-9/]`
 highlight link URL String
@@ -73,7 +78,7 @@ highlight link FlagSprint Constant
 " Flag Block ('-block#23')
 " syntax match FlagBlock "\v-block#\d+" contained
 syntax match FlagBlock "\v\$\d+" contained
-highlight link FlagBlock Delimiter
+highlight link FlagBlock Orange
 
 " Flag Waiting For Block ('-waiting=block#23')
 " syntax match FlagWaiting "\v-waiting\=block#\d+" contained
@@ -101,26 +106,28 @@ highlight link FlagRegion NerdTreeDir
 " highlight link Task Ignore
 
 
-" syntax match TaskBlock "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*-block" contains=ExclamationMark,Info
-" highlight link TaskBlock Bold
+" Task Block
+syntax match TaskBlock "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*\$\d+" contains=ExclamationMark,Info,Appointment
+highlight link TaskBlock Orange
 
-" syntax match TaskWaiting "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*-blocked" contains=ExclamationMark,Info
-" highlight link TaskWaiting Delimiter
+" Task Waiting
+syntax match TaskWaiting "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*\~\d+" contains=ExclamationMark,Info,Appointment
+highlight link TaskWaiting String
 
 " syntax match TaskScheduledWeek "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*-week" contains=ExclamationMark,Info
 " highlight link TaskScheduledWeek Constant
 
 " Task Scheduled for today
-syntax match TaskScheduledToday "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*\@today" contains=ExclamationMark,Info,Appointment
-highlight link TaskScheduledToday Orange
+" syntax match TaskScheduledToday "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*\@today" contains=ExclamationMark,Info,Appointment
+" highlight link TaskScheduledToday Orange
 
 " Task due today
-syntax match TaskDueToday "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*-due\=today" contains=ExclamationMark,Info,Appointment
-highlight link TaskDueToday Orange
+" syntax match TaskDueToday "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*-due\=today" contains=ExclamationMark,Info,Appointment
+" highlight link TaskDueToday Orange
 
 " Task overdue
-syntax match TaskOverdue "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*-overdue" contains=ExclamationMark,Info
-highlight link TaskOverdue Orange
+" syntax match TaskOverdue "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*-overdue" contains=ExclamationMark,Info
+" highlight link TaskOverdue Orange
 
 " Task Done, also all of it's subtasks.
 syntax region TaskDone start="\v^\t{0}- \[x\]+" skip="\v^\t{1,}" end="^" contains=FlagID
@@ -142,7 +149,18 @@ syntax region TaskDone start="\v^\t{14}- \[x\]+" skip="\v^\t{15,}" end="^" conta
 syntax match TaskFailedMarker "\v\[F\]" contained
 highlight link TaskFailedMarker Error
 
+
 syntax region TaskFailed start="\v^\t{0}- \[F\]+" skip="\v^\t{1,}" end="^" contains=TaskFailedMarker,FlagID
 syntax region TaskFailed start="\v^\t{1}- \[F\]+" skip="\v^\t{2,}" end="^" contains=TaskFailedMarker,FlagID
+" TODO other Task failed levels
+
+syntax match TaskCancelledMarker "\v\[-\]" contained
+highlight link TaskCancelledMarker NerdTreeDir
+
+syntax region TaskCancelled start="\v^\t{0}- \[-\]+" skip="\v^\t{1,}" end="^" contains=TaskCancelledMarker,FlagID
+syntax region TaskCancelled start="\v^\t{1}- \[-\]+" skip="\v^\t{2,}" end="^" contains=TaskCancelledMarker,FlagID
+" TODO other Task failed levels
+
 highlight link TaskDone NerdTreeDir
 highlight link TaskFailed NerdTreeDir
+highlight link TaskCancelled NerdTreeDir

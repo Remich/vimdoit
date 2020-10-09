@@ -11,8 +11,33 @@ endif
 let s:save_cpo = &cpo
 set cpo&vim
 
-" TODO better way
-let g:plugindir = '/home/pepe/software/vimdoit'
+" check user option for vim plugin path
+if exists("g:vimdoit_plugindir") == v:false
+	echoe "Vimdoit: Option 'g:vimdoit_plugindir' not set!"
+	finish
+endif
+
+" check user option for projects path
+if exists("g:vimdoit_projectsdir") == v:false
+	echoe "Vimdoit: Option 'g:vimdoit_projectsdir' not set!"
+	finish
+endif
+
+" check if 'dateseq' is installed
+let s:tools = ['dateseq', 'dateadd', 'dround']
+
+for t in s:tools
+	if trim(system("whereis ".t)) ==# t.":"
+		echoe "ERRROR: ".t." not found! A lot of stuff won't work. Please install ".t."."
+		finish
+	endif
+endfor
+
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+"																Global Variables												   "
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+let g:vimdoit_quickfix_type = 'none'
 
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 "																Writing Zettels   												 "
@@ -67,7 +92,7 @@ function! s:WriteZettelOverviewOfAllProjects()
 	bdel!
 	
 	" call external zettel writer
-	" let l:ret = system('node '.g:plugindir.'/src/write-zettels.js')
+	" let l:ret = system('node '.g:vimdoit_plugindir.'/src/write-zettels.js')
 	" if trim(l:ret) != ""
 	" 	echom l:ret
 	" endif
@@ -77,7 +102,7 @@ command! -nargs=0 WritePO	:call s:WriteZettelOverviewOfAllProjects()
 function! s:WriteZettels()
 	echom s:project_tree
 	let l:data = json_encode(s:project_tree)		
-	let l:ret = system('node '.g:plugindir.'/src/write-zettels.js -d '.shellescape(l:data))
+	let l:ret = system('node '.g:vimdoit_plugindir.'/src/write-zettels.js -d '.shellescape(l:data))
 	if trim(l:ret) != ""
 		echom l:ret
 	endif
@@ -133,8 +158,7 @@ function! s:DataSaveJSON()
 	execute 'normal! 1dd'
 	execute 'normal! 2dd'
 	write!
-	" echom "calling: ".'node /home/pepe/software/vimdoit/src/generate-overviews/index.js -p '.l:fullname
-  call system('node /home/pepe/software/vimdoit/src/generate-overviews/index.js -p '.l:fullname)
+  call system('node '.g:vimdoit_plugindir.'/src/generate-overviews/index.js -p '.l:fullname)
 	
 	let l:curbufname = bufname("%")
 	let l:alternative = bufname("#")
@@ -749,10 +773,14 @@ function! s:DataUpdateReferences()
 	"save cursor
 	let l:save_buffer = bufname()
 	let l:save_cursor = getcurpos()
+	let l:save_cwd    = getcwd()
+	call vimdoit_utility#SaveCfStack()
 
 	" save grep command of user
 	let l:grep_save = &grepprg
 	set grepprg=rg\ --vimgrep
+
+	execute "cd ".g:vimdoit_projectsdir
 
 	call s:DataCheckIDs()
 	let l:changedlines = s:DataFindChanges()
@@ -810,6 +838,12 @@ function! s:DataUpdateReferences()
 	
 	" restore cursor
 	call setpos('.', l:save_cursor)
+
+	" restore wd
+	execute "cd ".l:save_cwd
+
+	" restore cf stack
+	call vimdoit_utility#RestoreCfStack()
 endfunction
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -973,6 +1007,20 @@ function! s:ExtractProjectFlags(line)
 	return s:ExtractSectionHeadingFlags(getline(a:line))
 endfunction
 
+function! s:ExtractBlockId(line)
+	let l:pattern  = '\v.*--.*\$(\d+)'
+	let l:block  = []
+	call substitute(a:line, l:pattern, '\=add(l:block, submatch(1))', 'g')
+	return l:block[0]
+endfunction
+
+function! s:ExtractWaitings(line)
+	let l:pattern  = '\v\~(\d+)'
+	let l:waitings  = []
+	call substitute(a:line, l:pattern, '\=add(l:waitings, submatch(1))', 'g')
+	return l:waitings
+endfunction
+
 function! s:ExtractSectionHeading(line)
 	let l:pattern  = '\v^\t*\<\zs.*\ze\>'
 	let l:heading  = []
@@ -991,6 +1039,53 @@ function! s:ExtractSectionLevel(line)
 	let l:tabs    = []
 	call substitute(a:line, l:pattern, '\=add(l:tabs, submatch(0))', 'g')
 	return strlen(l:tabs[0])
+endfunction
+
+function! s:ExtractStartDateOfRepetition(line)
+	let l:pattern = '\v\{.*\zs\d{4}-\d{2}-\d{2}\ze.*\|[a-z]{1,2}:.*(\|.*)?\}'
+	let l:startdate    = []
+	call substitute(a:line, l:pattern, '\=add(l:startdate, submatch(0))', 'g')
+	return trim(l:startdate[0])
+endfunction
+
+function! s:ExtractEndDateOfRepetition(line)
+	let l:pattern = '\v\{.*\d{4}-\d{2}-\d{2}.*\|[a-z]{1,2}:.*\|\zs\d{4}-\d{2}-\d{2}\ze\}'
+	let l:enddate    = []
+	call substitute(a:line, l:pattern, '\=add(l:enddate, submatch(0))', 'g')
+
+	if len(l:enddate) == 0
+		return '2999-12-31'
+	else
+		return trim(l:enddate[0])
+	endif
+endfunction
+
+function! s:ExtractRepetitionOperator(line)
+	let l:pattern = '\v\{.*\d{4}-\d{2}-\d{2}.*\|\zs[a-z]{1,2}\ze:.*(\|.*)?\}'
+	let l:operator    = []
+	call substitute(a:line, l:pattern, '\=add(l:operator, submatch(0))', 'g')
+	return trim(l:operator[0])
+endfunction
+
+function! s:ExtractRepetitionOperand(line)
+	let l:pattern = '\v\{.*\d{4}-\d{2}-\d{2}.*\|[a-z]{1,2}:\zs.{-}\ze(\|.*)?\}'
+	let l:operand    = []
+	call substitute(a:line, l:pattern, '\=add(l:operand, submatch(0))', 'g')
+	return trim(l:operand[0])
+endfunction
+
+function! s:ExtractStartDate(line)
+	let l:pattern = '\v\{.*\zs\d{4}-\d{2}-\d{2}\ze.*\}-\{.*\d{4}-\d{2}-\d{2}.*\}'
+	let l:startdate    = []
+	call substitute(a:line, l:pattern, '\=add(l:startdate, submatch(0))', 'g')
+	return trim(l:startdate[0])
+endfunction
+
+function! s:ExtractEndDate(line)
+	let l:pattern = '\v\{.*\d{4}-\d{2}-\d{2}.*\}-\{.*\zs\d{4}-\d{2}-\d{2}\ze.*\}'
+	let l:enddate    = []
+	call substitute(a:line, l:pattern, '\=add(l:enddate, submatch(0))', 'g')
+	return trim(l:enddate[0])
 endfunction
 
 function! s:ExtractTaskName(line)
@@ -1062,13 +1157,13 @@ function! s:ExtractFlagsFromFlagRegion(region)
 	call substitute(l:line, l:pattern, '\=add(l:flags["sprint"], submatch(0))', 'g')
 	let l:line = substitute(l:line, l:pattern, '', 'g')
 	
-	" extract block flags ('-block#42')
+	" extract block flags ('$42')
 	let l:pattern = '\v\$\d+'
 	let l:normal    = []
 	call substitute(l:line, l:pattern, '\=add(l:flags["block"], submatch(0))', 'g')
 	let l:line = substitute(l:line, l:pattern, '', 'g')
 	
-	" extract waiting for block flags ('-waiting=block#23')
+	" extract waiting for block flags ('~23')
 	let l:pattern = '\v\~\d+'
 	let l:normal    = []
 	call substitute(l:line, l:pattern, '\=add(l:flags["waiting_block"], submatch(0))', 'g')
@@ -1084,7 +1179,9 @@ function! s:ExtractFlagsFromFlagRegion(region)
 	let l:pattern = '\v0x(\x{8})'
 	let l:id = []
 	call substitute(l:line, l:pattern, '\=add(l:id, submatch(1))', 'g')
-	let l:flags["id"] = l:id[0]
+	if len(l:id) > 0
+		let l:flags["id"] = l:id[0]
+	endif
 	let l:line = substitute(l:line, l:pattern, '', 'g')
 	
 	"extract flag ordinary tag ('#tag')
@@ -1299,6 +1396,7 @@ augroup VimDoit
 	if !hasmapto('<Plug>VimdoitUncheckTask')
 		autocmd Filetype vimdoit nmap <buffer> <leader><Space>	<Plug>VimdoitUncheckTask
 	endif
+	
 augroup END
 
 function! s:CheckTask()
@@ -1313,28 +1411,1078 @@ function! s:UncheckTask()
 	call setline('.', l:newline)
 endfunction
 
-command! -nargs=? GrepToday	:call s:GrepToday()
 
-function! s:GrepToday()
-	echom "grepping today"
-	" grep HABIT *
-	execute ":Grepper -noprompt -side -query HABIT"
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+"                        Quickfix Manipulation                          "
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+function! s:GetQfTitle()
+	if exists("w:quickfix_title")
+		return w:quickfix_title
+	else
+		copen
+		return w:quickfix_title
+	endif
 endfunction
 
-" ============
-" = MAPPINGS =
-" ============
+function! s:HasQfTitleKey(title, key)
+	if a:title =~# '\v\| '.a:key.': .*'
+		return v:true
+	else
+		return v:false
+	endif
+endfunction
+
+function! s:ModifyQfTitle(title, action, key, value)
+
+	if a:action ==# 'add'
+		if s:HasQfTitleKey(a:title, a:key) == v:true
+			" modify
+			return substitute(a:title, '\v'.a:key.': .*($|\|)', a:key.': '.a:value, '')	
+		else
+			" append
+			return a:title." | ".a:key.": ".a:value
+		endif
+	elseif a:action ==# 'remove'
+		" remove
+	endif
+	
+endfunction
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+"                              Sorting                                  "
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+
+function! s:SortQuickfix()
+	let selections = [
+				\ 'priority',
+				\ 'project',
+				\ 'date',
+				\ 'due date (only projects)',
+				\ 'start date (only projects)',
+				\ 'completion date (only projects)',
+				\ ]
+	let selections_dialog = [
+				\ '&priority',
+				\ 'p&roject',
+				\ '&date',
+				\ 'd&ue date (only projects)',
+				\ '&start date (only projects)',
+				\ '&completion date (only projects)',
+				\ ]
+	let input = confirm('Sort Quickfix List by', join(selections_dialog, "\n"))
+	
+	let l:qf = getqflist()
+	let title = s:GetQfTitle()
+
+	if selections[input-1] ==# 'priority'
+		echom "Sorting by Priority."
+		call sort(l:qf, 's:CmpQfByPriority')
+		let title = s:ModifyQfTitle(title, 'add', 'sort', 'priority')
+	elseif selections[input-1] ==# 'project'
+		call sort(l:qf, 's:CmpQfByProject')
+		echom "Sorting by Project"
+		let title = s:ModifyQfTitle(title, 'add', 'sort', 'project')
+	elseif selections[input-1] ==# 'date'
+		call sort(l:qf, 's:CmpQfByDate')
+		echom "Sorting by Date"
+		let title = s:ModifyQfTitle(title, 'add', 'sort', 'date')
+	elseif selections[input-1] ==# 'due date (only projects)'
+		if g:vimdoit_quickfix_type ==# 'project'
+			call sort(l:qf, 's:CmpQfByDueDate')
+			echom "Sorting by Due Date (Only Projects)"
+			let title = s:ModifyQfTitle(title, 'add', 'sort', 'due date')
+		else
+			echoe "Quickfix List is not of type project."	
+			return
+		endif
+	elseif selections[input-1] ==# 'start date (only projects)'
+		if g:vimdoit_quickfix_type ==# 'project'
+			call sort(l:qf, 's:CmpQfByStartDate')
+			echom "Sorting by Start Date (Only Projects)"
+			let title = s:ModifyQfTitle(title, 'add', 'sort', 'start date')
+		else
+			echoe "Quickfix List is not of type project."	
+			return
+		endif
+	elseif selections[input-1] ==# 'completion date (only projects)'
+		if g:vimdoit_quickfix_type ==# 'project'
+			call sort(l:qf, 's:CmpQfByCompletionDate')
+			echom "Sorting by Completion Date (Only Projects)"
+			let title = s:ModifyQfTitle(title, 'add', 'sort', 'completion date')
+		else
+			echoe "Quickfix List is not of type project."	
+			return
+		endif
+	endif
+	
+	" replace list
+	call setqflist(l:qf, 'r')	
+	
+endfunction
+
+function! s:GetNumExclamations(str)
+	let l:pattern  = '\v!'
+	let l:marks  = []
+	call substitute(a:str, l:pattern, '\=add(l:marks, submatch(0))', 'g')
+	return len(l:marks)
+endfunction
+
+function! s:CmpQfByPriority(e1, e2)
+	let [t1, t2] = [s:GetNumExclamations(a:e1.text), s:GetNumExclamations(a:e2.text)]
+	return t1 ># t2 ? -1 : t1 ==# t2 ? 0 : 1
+endfunction
+
+function! s:CmpQfByProject(e1, e2)
+	let [t1, t2] = [bufname(a:e1.bufnr), bufname(a:e2.bufnr)]
+	return t1 ># t2 ? 1 : t1 ==# t2 ? 0 : -1
+endfunction
+
+function! s:GetDateOnly(str)
+	let l:pattern  = '\v\{.*\zs(\d{4}-\d{2}-\d{2})\ze.*\}'
+	let l:date  = []
+	call substitute(a:str, l:pattern, '\=add(l:date, submatch(0))', 'g')
+
+	if len(l:date) != 0
+		return trim(l:date[0])
+	else
+		return v:false
+	endif
+endfunction
+
+function! s:GetDateAndTime(str)
+	let l:pattern  = '\v\{.*\zs(\d{4}-\d{2}-\d{2}).*(\d{2}:\d{2})?\ze\}'
+	let l:date  = []
+	call substitute(a:str, l:pattern, '\=add(l:date, submatch(0))', 'g')
+
+	if len(l:date) != 0
+		return trim(l:date[0])
+	else
+		return v:false
+	endif
+endfunction
+
+function! s:CmpQfByDate(e1, e2)
+	let [t1, t2] = [s:GetDateAndTime(a:e1.text), s:GetDateAndTime(a:e2.text)]
+	return t1 ># t2 ? 1 : t1 ==# t2 ? 0 : -1
+endfunction
+
+function! s:GetDueDate(str)
+	let l:pattern  = '\v\%\zs(\d{4}-\d{2}-\d{2})\ze'
+	let l:date  = []
+	call substitute(a:str, l:pattern, '\=add(l:date, submatch(0))', 'g')
+
+	if len(l:date) != 0
+		return trim(l:date[0])
+	else
+		return v:false
+	endif
+endfunction
+
+function! s:CmpQfByDueDate(e1, e2)
+	let [t1, t2] = [s:GetDueDate(a:e1.text), s:GetDueDate(a:e2.text)]
+	return t1 ># t2 ? 1 : t1 ==# t2 ? 0 : -1
+endfunction
+
+function! s:GetStartDate(str)
+	let l:pattern  = '\v\^\zs(\d{4}-\d{2}-\d{2})\ze'
+	let l:date  = []
+	call substitute(a:str, l:pattern, '\=add(l:date, submatch(0))', 'g')
+
+	if len(l:date) != 0
+		return trim(l:date[0])
+	else
+		return v:false
+	endif
+endfunction
+
+function! s:CmpQfByStartDate(e1, e2)
+	let [t1, t2] = [s:GetStartDate(a:e1.text), s:GetStartDate(a:e2.text)]
+	return t1 ># t2 ? 1 : t1 ==# t2 ? 0 : -1
+endfunction
+
+function! s:GetCompletionDate(str)
+	let l:pattern  = '\v\$\zs(\d{4}-\d{2}-\d{2})\ze'
+	let l:date  = []
+	call substitute(a:str, l:pattern, '\=add(l:date, submatch(0))', 'g')
+
+	if len(l:date) != 0
+		return trim(l:date[0])
+	else
+		return v:false
+	endif
+endfunction
+
+function! s:CmpQfByCompletionDate(e1, e2)
+	let [t1, t2] = [s:GetCompletionDate(a:e1.text), s:GetCompletionDate(a:e2.text)]
+	return t1 ># t2 ? 1 : t1 ==# t2 ? 0 : -1
+endfunction
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+"                              Grepping                                 "
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+function! s:GrepProjectsByTag(tag, path)
+
+	call vimdoit_utility#SaveCfStack()
+	call vimdoit_utility#SaveOptions()
+	
+	execute "cd ".a:path
+
+	let &grepprg='rg --vimgrep --pre '.g:vimdoit_plugindir.'/scripts/pre-head.sh'
+	
+	if a:tag ==# 'all'
+		let pattern = '"^.*$"'
+		let title = "projects: all"
+	elseif a:tag ==# 'not tagged'
+		let pattern = '^\<.*\>[[:space:]]*$'
+		let title = "projects: not tagged"
+	elseif a:tag ==# 'not complete or cancelled or archived'
+		let pattern = '"\#complete\|\#cancelled\|\#archived"'
+		let &grepprg='rg --vimgrep --invert-match --pre '.g:vimdoit_plugindir.'/scripts/pre-head.sh'
+		let title = "projects: not complete or cancelled or archived"
+	else
+		let pattern = '"^<.*>.*\#'.a:tag.'"'
+		let title = "projects: #".a:tag
+	endif
+
+	" grep
+	execute 'grep! --type-add '"vimdoit:*.vdo"' -t vimdoit '.pattern.' ' | copen
+	
+	" sort by priority
+	let l:qf  = getqflist()
+	call sort(l:qf, 's:CmpQfByPriority')
+	let title = s:ModifyQfTitle(title, 'add', 'sort', 'priority')
+	call setqflist(l:qf, 'r')	
+	let g:vimdoit_quickfix_type = 'project'
+
+	call vimdoit_utility#RestoreOptions()
+endfunction
+command! -nargs=? GrepFocused	:call s:GrepProjectsByTag()
+
+function! s:GrepTasksWithInvalidAppointment(path)
+
+	call vimdoit_utility#SaveCfStack()
+	call vimdoit_utility#SaveOptions()
+
+	" TODO set grep format
+	
+	if a:path ==# '%'
+		let file = '%'
+	else
+		let file = ''
+		execute "cd ".a:path
+	endif	
+	
+	" 1. grep all appointments
+	let pattern = "\\{.*\\}"
+	execute 'silent! grep! --type-add '"vimdoit:*.vdo"' -t vimdoit "'.pattern.'" '.file
+	let l:qf_all = getqflist()
+
+	if len(l:qf_all) == 0
+		return
+	endif
+
+
+	" 2. grep all valid appointments
+	let pattern = "\\{.*\\d{4}-\\d{2}-\\d{2}.*\\}"
+	execute 'silent! grep! --type-add '"vimdoit:*.vdo"' -t vimdoit "'.pattern.'" '.file | copen
+	let l:qf_valid = getqflist()
+
+	if len(l:qf_valid) == 0
+		return
+	endif
+
+	" 3. filter valid appointments from all
+	let l:qf_new = []
+	for d in l:qf_all
+
+		let l:found = v:false
+		
+		for e in l:qf_valid
+			if e.text ==# d.text
+				let l:found = v:true
+			endif
+		endfor
+
+		if l:found == v:false
+			call add(l:qf_new, d)
+		endif
+
+	endfor
+	
+	call vimdoit_utility#RestoreCfStack()
+	
+	" push new list
+	" call setqflist(l:qf_new, 'a', {'title' : 'tasks: invalid appointment'})
+	call setqflist(l:qf_new, 'a')
+	
+	call vimdoit_utility#RestoreOptions()
+endfunction
+
+function! s:HasRange(text)
+	if a:text =~# '\v\{.*\d{4}-\d{2}-\d{2}.*\}-\{.*\d{4}-\d{2}-\d{2}.*\}'		
+		return v:true
+	else
+		return v:false
+	endif
+endfunction
+
+
+function! s:HasRepetition(text)
+	" check if entry has repetition
+	if a:text =~# '\v\{.*\|[a-z]{1,2}:.*(\|.*)?\}'		
+		return v:true
+	else
+		return v:false
+	endif
+endfunction
+
+function! s:InterpolateDates(qf)
+	
+	" ranges
+	let new_qf = []
+	for i in a:qf
+		" check if entry has a range
+		if s:HasRange(i.text) == v:true
+			" extract start date
+			let start = s:ExtractStartDate(i.text)
+			" extract end date
+			let end = s:ExtractEndDate(i.text)
+			" compute interpolated dates
+			let seq = split(system('dateseq '.shellescape(start).' '.shellescape(end)), '\v\n')
+			" add interpolated dates
+			for j in seq
+				let tmp = copy(i)
+				let tmp.text = substitute(i.text, '\v\{.*\d{4}-\d{2}-\d{2}.*\}-\{.*\d{4}-\d{2}-\d{2}.*\}', '{'.j.'}', '')
+				call add(new_qf, tmp)
+			endfor
+		else
+			call add(new_qf, i)
+		endif
+	endfor
+
+	" repetitions
+	let new_new_qf = []
+	for i in new_qf
+		" check if entry has repetition
+		if s:HasRepetition(i.text) == v:true
+			" extract start date
+			let start = s:ExtractStartDateOfRepetition(i.text)
+			" extract end date
+			let end = s:ExtractEndDateOfRepetition(i.text)
+			" extract repetition operator
+			let operator = s:ExtractRepetitionOperator(i.text)
+			" extract repetition operand
+			let operand = s:ExtractRepetitionOperand(i.text)
+
+			" add repetitions up to three months into the future
+			let today = strftime('%Y-%m-%d')
+			let limit = system('dateadd '.shellescape(today).' +3mo')
+			let cur = start
+				while cur <=# limit && cur <=# end
+
+				let tmp = copy(i)
+				let tmp.text = substitute(i.text, '\v\{.*\|[a-z]{1,2}:.*(\|.*)?\}', '{'.cur.'}', '')
+
+				" check if there exists an entry which is being interpolated, use the
+				" existing one instead
+				let grep_text = substitute(i.text, '\v\{.*\|[a-z]{1,2}:.*(\|.*)?\}', '\\{'.cur.'\\}', '')
+				let grep_text = substitute(grep_text, '\v^\s*- \[.\]\s', '', '')
+				let grep_text = substitute(grep_text, '\v\s*--.*$', '', '')
+				
+				" grep
+				execute 'silent! grep! --type-add '"vimdoit:*.vdo"' -t vimdoit "'.grep_text.'"' | copen
+
+				let tmp_qf = getqflist()
+				if len(tmp_qf) > 0
+					" yes: don't do anything, existing entry will be grepped automatically
+				else
+					" no: use interpolated entry
+					call add(new_new_qf, tmp)
+				endif
+				
+				" date addition
+				let cur = trim(system('dateadd '.shellescape(cur).' +'.operand.operator))	
+			endwhile
+				
+		else
+			call add(new_new_qf, i)
+		endif
+	endfor
+
+	return new_new_qf
+endfunction
+
+function! s:GrepTasksByStatus(status, path)
+
+	call vimdoit_utility#SaveCfStack()
+	call vimdoit_utility#SaveOptions()
+
+	if a:path ==# '%'
+		let file = '%'
+	else
+		let file = ''
+		execute "cd ".a:path
+	endif	
+	
+	let pattern = ""
+
+	if a:status ==# 'all'
+		let pattern = "\\- \\[.\\]"
+		let title = 'tasks: all'
+	elseif a:status ==# 'todo'
+		let pattern = "\\- \\[ \\]" 
+		let title = 'tasks: todo'
+	elseif a:status ==# 'next'
+		let pattern = "[\\#]next"
+		let title = 'tasks: #next'
+	elseif a:status ==# 'current'
+		let pattern = "[\\#]cur"
+		let title = 'tasks: #cur'
+	elseif a:status ==# 'scheduled'
+		let pattern = "\\{.*\\}"
+		let title = 'tasks: scheduled'
+	elseif a:status ==# 'appointment'
+		let pattern = "\\{.*\\d{4}-\\d{2}-\\d{2}.*\\}"
+		let title = 'tasks: appointment'
+	elseif a:status ==# 'done'
+		let pattern = "\\- \\[x\\]"
+		let title = 'tasks: done'
+	elseif a:status ==# 'waiting'
+		let pattern = "~\\d+"
+		let title = 'tasks: waiting'
+	elseif a:status ==# 'block'
+		let pattern = "[$]\\d+"
+		let title = 'tasks: block'
+	elseif a:status ==# 'failed'
+		let pattern = "\\- \\[F\\]"
+		let title = 'tasks: failed'
+	elseif a:status ==# 'cancelled'
+		let pattern = "\\- \\[-\\]"
+		let title = 'tasks: cancelled'
+	endif
+	
+	execute 'silent! grep! --pre '.g:vimdoit_plugindir.'/scripts/pre-project.sh --type-add '"vimdoit:*.vdo"' -t vimdoit "'.pattern.'" '.file | copen
+
+	let l:qf = getqflist()
+	
+	if a:status ==# 'appointment'
+		" interpolate date ranges and repeating dates
+		let l:qf = s:InterpolateDates(l:qf)
+		" sort by date
+		call sort(l:qf, 's:CmpQfByDate')
+		let title = s:ModifyQfTitle(title, 'add', 'sort', 'date')
+		let g:vimdoit_quickfix_type = 'appointment'
+	else
+		" sort by priority
+		call sort(l:qf, 's:CmpQfByPriority')
+		let title = s:ModifyQfTitle(title, 'add', 'sort', 'priority')
+		let g:vimdoit_quickfix_type = 'task'
+	endif
+	
+	" push list
+	call setqflist(l:qf, 'r')	
+		
+	call vimdoit_utility#RestoreOptions()
+endfunction
+
+function! s:GrepProjects(all)
+
+	if a:all == v:true
+		let path = g:vimdoit_projectsdir
+	else
+		let path = getcwd()
+	endif
+
+	let path_nicened = substitute(path, '\v'.g:vimdoit_projectsdir, '', '')
+
+	if path_nicened ==# ''
+		let path_nicened = '/'
+	endif
+
+	let selections = [
+				\ 'all',
+				\ 'active',
+				\ 'focus',
+				\ 'complete',
+				\ 'cancelled',
+				\ 'archived',
+				\ 'not complete or cancelled or archived',
+				\ 'not tagged',
+				\ ]
+	let selections_dialog = [
+				\ '&all',
+				\ 'ac&tive',
+				\ '&focus',
+				\ '&complete',
+				\ 'ca&ncelled',
+				\ 'a&rchived',
+				\ 'not co&mplete or cancelled or archived',
+				\ 'n&ot tagged',
+				\ ]
+	
+	let input  = confirm('Searching Projects in '.shellescape(path_nicened).'', join(selections_dialog, "\n"))
+	call s:GrepProjectsByTag(selections[input-1], path)
+	
+endfunction
+
+function! s:GrepTasks(where)
+	
+	if a:where ==# 'project'
+		let path = '%'
+	elseif a:where ==# 'area'
+		let path = getcwd()
+	else
+		let path = g:vimdoit_projectsdir
+	endif
+	
+	let path_nicened = substitute(path, '\v'.g:vimdoit_projectsdir, '', '')
+
+	if path_nicened ==# ''
+		let path_nicened = '/'
+	endif
+
+	let selections = [
+				\ 'all',
+				\ 'todo',
+				\ 'next',
+				\ 'current',
+				\ 'waiting',
+				\ 'block',
+				\ 'scheduled',
+				\ 'appointment',
+				\ 'invalid appointment',
+				\ 'done',
+				\ 'failed',
+				\ 'cancelled',
+				\ ]
+	let selections_dialog = [
+				\ '&all',
+				\ '&todo',
+				\ '&next',
+				\ 'cu&rrent',
+				\ '&waiting',
+				\ '&block',
+				\ '&scheduled',
+				\ 'a&ppointment',
+				\ '&invalid appointment',
+				\ '&done',
+				\ '&failed',
+				\ '&cancelled',
+				\ ]
+	
+	let input = confirm('Searching Tasks in '.shellescape(path_nicened).'', join(selections_dialog, "\n"))
+
+	if selections[input-1] ==# 'invalid appointment'
+		call s:GrepTasksWithInvalidAppointment(path)
+	else
+		call s:GrepTasksByStatus(selections[input-1], path)
+	endif
+endfunction
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+"                               Filtering                               "
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+function! s:GetID(str)
+	let l:pattern  = '\v0x\x{8}'
+	let l:id  = []
+	call substitute(a:str, l:pattern, '\=add(l:id, submatch(0))', 'g')
+	return l:id[0]
+endfunction
+
+function! s:FilterQuickfix()
+
+	function! Todo(idx, val)
+		if a:val["text"] !~# '\v\- \[ \]'
+			return v:false
+		else
+			return v:true
+		endif
+	endfunction
+	
+	function! Done(idx, val)
+		if a:val["text"] !~# '\v\- \[x\]'
+			return v:false
+		else
+			return v:true
+		endif
+	endfunction
+	
+	function! Failed(idx, val)
+		if a:val["text"] !~# '\v\- \[F\]'
+			return v:false
+		else
+			return v:true
+		endif
+	endfunction
+	
+	function! Cancelled(idx, val)
+		if a:val["text"] !~# '\v\- \[-\]'
+			return v:false
+		else
+			return v:true
+		endif
+	endfunction
+
+	function! HasSameID(e1, e2)
+		let [t1, t2] = [s:GetID(a:e1.text), s:GetID(a:e2.text)]
+		return t1 ==# t2 ? 0 : 1
+	endfunction
+
+	function! Today(idx, val)
+		let date  = s:GetDateOnly(a:val.text)
+		let today = strftime("%Y-%m-%d")
+		if date ==# today
+			return v:true
+		else
+			return v:false
+		endif
+	endfunction
+
+	function! Tomorrow(idx, val)
+		let date     = s:GetDateOnly(a:val.text)
+		let today    = strftime("%Y-%m-%d")
+		let tomorrow = trim(system('dateadd '.shellescape(today).' +1d'))
+		if date ==# tomorrow
+			return v:true
+		else
+			return v:false
+		endif
+	endfunction
+
+	function! ThisWeek(idx, val)
+		let date   = s:GetDateOnly(a:val.text)
+		let today  = strftime("%Y-%m-%d")
+		let monday = trim(system('dround '.shellescape(today).' -- -Mon'))
+		let sunday = trim(system('dround '.shellescape(today).' -- Sun'))
+		if date >=# monday && date <=# sunday
+			return v:true
+		else
+			return v:false
+		endif
+	endfunction
+
+	function! NextWeek(idx, val)
+		let date           = s:GetDateOnly(a:val.text)
+		let today          = strftime("%Y-%m-%d")
+		let todayinoneweek = trim(system('dateadd '.shellescape(today).' +7d'))
+		let nextmonday     = trim(system('dround '.shellescape(todayinoneweek).' -- -Mon'))
+		let nextsunday     = trim(system('dround '.shellescape(todayinoneweek).' -- Sun'))
+		if date >=# nextmonday && date <=# nextsunday
+			return v:true
+		else
+			return v:false
+		endif
+	endfunction
+	
+	function! ThisMonth(idx, val)
+		let date             = s:GetDateOnly(a:val.text)
+		let today            = strftime("%Y-%m-%d")
+		let firstofmonth     = trim(system('dround '.shellescape(today).' /-1mo'))
+		let firstofnextmonth = trim(system('dround '.shellescape(today).' /1mo'))
+		if date >=# firstofmonth && date <# firstofnextmonth
+			return v:true
+		else
+			return v:false
+		endif
+	endfunction
+	
+	function! Upcoming(idx, val)
+		let date = s:GetDateAndTime(a:val.text)
+		let now = strftime('%Y-%m-%d')
+		if date <# now
+			return v:false
+		else
+			return v:true
+		endif
+	endfunction
+	
+	function! Past(idx, val)
+		let upcoming = Upcoming(a:idx, a:val)
+		if upcoming == v:true
+			return v:false
+		else
+			return v:true
+		endif
+	endfunction
+	
+	" get qf list
+	let l:qf = getqflist()
+	
+	" abort if no entries
+	if len(l:qf) == 0
+		echoe "Empty Quickfix List."
+		return
+	endif
+	
+	let selections = [
+				\ 'todo',
+				\ 'done',
+				\ 'failed',
+				\ 'cancelled',
+				\ 'unique',
+				\ 'today*',
+				\ 'tomorrow*',
+				\ 'this week*',
+				\ 'next week*',
+				\ 'this month*',
+				\ 'upcoming*',
+				\ 'past*',
+				\ 'not in completed/cancelled/archived projects',
+				\ ]
+	let selections_dialog = [
+				\ '&todo',
+				\ '&done',
+				\ '&failed',
+				\ '&cancelled',
+				\ '&unique',
+				\ 't&oday*',
+				\ 'to&morrow*',
+				\ 't&his week*',
+				\ 'n&ext week*',
+				\ 'th&is month*',
+				\ 'u&pcoming*',
+				\ 'p&ast*',
+				\ '&not in completed/cancelled/archived projects',
+				\ ]
+	let input  = confirm('Filter Quickfix List by', join(selections_dialog, "\n"))
+
+	if selections[input-1] ==# 'todo'
+		call filter(l:qf, function('Todo'))
+	elseif selections[input-1] ==# 'done'
+		call filter(l:qf, function('Done'))
+	elseif selections[input-1] ==# 'failed'
+		call filter(l:qf, function('Failed'))
+	elseif selections[input-1] ==# 'cancelled'
+		call filter(l:qf, function('Cancelled'))
+	elseif selections[input-1] ==# 'unique'
+		call uniq(l:qf, function('HasSameID'))
+	elseif selections[input-1] ==# 'today*'
+		if g:vimdoit_quickfix_type ==# 'appointment'
+			call filter(l:qf, function('Today'))
+		else
+			echoe "Quickfix List is not of type appointment."
+		endif
+	elseif selections[input-1] ==# 'tomorrow*'
+		if g:vimdoit_quickfix_type ==# 'appointment'
+			call filter(l:qf, function('Tomorrow'))
+		else
+			echoe "Quickfix List is not of type appointment."
+		endif
+	elseif selections[input-1] ==# 'this week*'
+		if g:vimdoit_quickfix_type ==# 'appointment'
+			call filter(l:qf, function('ThisWeek'))
+		else
+			echoe "Quickfix List is not of type appointment."
+		endif
+	elseif selections[input-1] ==# 'next week*'
+		if g:vimdoit_quickfix_type ==# 'appointment'
+			call filter(l:qf, function('NextWeek'))
+		else
+			echoe "Quickfix List is not of type appointment."
+		endif
+	elseif selections[input-1] ==# 'this month*'
+		if g:vimdoit_quickfix_type ==# 'appointment'
+			call filter(l:qf, function('ThisMonth'))
+		else
+			echoe "Quickfix List is not of type appointment."
+		endif
+	elseif selections[input-1] ==# 'upcoming*'
+		if g:vimdoit_quickfix_type ==# 'appointment'
+			call filter(l:qf, function('Upcoming'))
+		else
+			echoe "Quickfix List is not of type appointment."
+		endif
+	elseif selections[input-1] ==# 'past*'
+		if g:vimdoit_quickfix_type ==# 'appointment'
+			call filter(l:qf, function('Past'))
+		else
+			echoe "Quickfix List is not of type appointment."
+		endif
+	elseif selections[input-1] ==# 'not in completed/cancelled/archived projects'
+		echoe "Not implemented"
+	endif
+	
+	" push list
+	call setqflist(l:qf)	
+	
+endfunction
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+"                           Modyifing Tasks                             "
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+function! s:ModifyTaskStatus(state, lines)
+
+	if a:state ==# 'done'
+		let str = 'x'
+	elseif a:state ==# 'todo'
+		let str = ' '
+	elseif a:state ==# 'failed'
+		let str = 'F'
+	elseif a:state ==# 'cancelled'
+		let str = '-'
+	endif
+
+	for i in a:lines
+		execute i.'substitute/\v^\s*- \[\zs.\ze\]/'.str.'/'
+	endfor
+	
+endfunction
+
+function! s:GenerateBlockID()
+	call vimdoit_utility#SaveCfStack()
+	
+	function! CmpByNumber(n1, n2)
+		let n1 = a:n1 + 0
+		let n2 = a:n2 + 0
+		return n1 < n2 ? 1 : n1 == n2 ? 0 : -1
+	endfunction
+	
+	let pattern = '.*--.*\\$\\d+'
+	execute 'silent! grep! --type-add '"vimdoit:*.vdo"' -t vimdoit "'.pattern.'" '
+
+	let qf = getqflist()
+
+	if len(qf) == 0
+		" no existing blocks
+		return 1
+	endif
+
+	let ids = []
+	for i in qf
+		call add(ids, s:ExtractBlockId(i.text))
+	endfor
+	call sort(uniq(ids), 'CmpByNumber')
+	
+	call vimdoit_utility#RestoreCfStack()
+	
+	return ids[0]+1
+endfunction
+
+function! s:ModifyTaskBlock(lines)
+	for i in a:lines
+		let line = getline(i)
+		" check if line is already a block?
+		if line =~# '\v--.*\zs \$\d+\ze'
+			" yes: remove block
+			execute i.'substitute/\v--.*\zs \$\d+\ze//'
+		else
+			" no: add block
+			let id = s:GenerateBlockID()
+			call setline(i, line.' $'.id)
+		endif		
+	endfor
+endfunction
+
+function! s:PrependSelectionWithNumbers(selection)
+	let new = []
+	let num = 1
+	for i in a:selection
+		call add(new, num.' '.i)	
+		let num = num + 1
+	endfor
+	return new
+endfunction
+
+function! s:ModifyTaskWaitingRemove(lines)
+	for i in a:lines
+		let blocks = s:ExtractWaitings(getline(i))
+		let blocks_selection = s:PrependSelectionWithNumbers(blocks)
+		let blocks_selection = extend(blocks_selection, ['all'], 0)
+		let input = confirm('Select ID(s) for "'.getline(i).'": ', join(blocks_selection, "\n"))
+
+		if blocks_selection[input-1] ==# 'all'
+			" remove all
+			execute i.'substitute/\v \~\d+//g'
+		else
+			" remove specific
+			execute i.'substitute/\v \~'.blocks[input-2].'//'
+		endif
+	endfor
+endfunction
+
+function! s:ModifyTaskWaitingAdd(lines)
+	let id = input('Enter Block ID: ')	
+	
+	for i in a:lines
+		call setline(i, getline(i).' ~'.id)
+	endfor
+endfunction
+
+function! s:ModifyTaskToTask(lines)
+	for i in a:lines
+		execute i.'substitute/\v^\s*\zs- (\[.\])?\ze/- [ ] /'
+	endfor
+endfunction
+
+function! s:ModifyTaskToNote(lines)
+	for i in a:lines
+		execute i.'substitute/\v^\s*\zs- (\[.\] )?\ze/- /'
+	endfor
+endfunction
+
+function! s:ModifyTaskRmID(lines)
+	for i in a:lines
+		execute i.'substitute/\v0x\x{8}//'
+	endfor
+endfunction
+
+function! s:ModifyTaskPrompt(type)
+	let selections = [
+				\ 'done',
+				\ 'todo',
+				\ 'failed',
+				\ 'cancelled',
+				\ 'block',
+				\ 'rm waiting',
+				\ 'add waiting',
+				\ 'action',
+				\ 'priority',
+				\ 'to task',
+				\ 'to note',
+				\ 'rm ID',
+				\ ]
+	let selections_dialog = [
+				\ '&done',
+				\ '&todo',
+				\ '&failed',
+				\ '&cancelled',
+				\ '&block',
+				\ 'r&m waiting',
+				\ 'add &waiting',
+				\ '&action',
+				\ '&priority',
+				\ 'to ta&sk',
+				\ 'to n&ote',
+				\ '&rm ID',
+				\ ]
+	let input = confirm('Modify Task(s): ', join(selections_dialog, "\n"))
+
+	if a:type ==# 'V'
+		let start = line("'<")
+		let end   = line("'>")
+		let lines = range(start, end)
+	elseif a:type ==# 'char'
+		let lines = [ line(".") ]
+	endif
+	
+	if selections[input-1] ==# 'done'
+		call s:ModifyTaskStatus('done', lines)
+	elseif selections[input-1] ==# 'todo'
+		call s:ModifyTaskStatus('todo', lines)
+	elseif selections[input-1] ==# 'failed'
+		call s:ModifyTaskStatus('failed', lines)
+	elseif selections[input-1] ==# 'cancelled'
+		call s:ModifyTaskStatus('cancelled', lines)
+	elseif selections[input-1] ==# 'block'
+		call s:ModifyTaskBlock(lines)
+	elseif selections[input-1] ==# 'rm waiting'
+		call s:ModifyTaskWaitingRemove(lines)
+	elseif selections[input-1] ==# 'add waiting'
+		call s:ModifyTaskWaitingAdd(lines)
+	elseif selections[input-1] ==# 'to task'
+		call s:ModifyTaskToTask(lines)
+	elseif selections[input-1] ==# 'to note'
+		call s:ModifyTaskToNote(lines)
+	elseif selections[input-1] ==# 'action'
+		echoe "Not implemented"
+	elseif selections[input-1] ==# 'priority'
+		echoe "Not implemented"
+	elseif selections[input-1] ==# 'rm ID'
+		call s:ModifyTaskRmID(lines)
+	endif
+endfunction
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+"                               Mappings                                "
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+augroup vimdoit
+	autocmd!
+	
+	if exists("g:vimdoit_did_load_mappings") == v:false
+		
+		" Grep projects in cwd
+		if !hasmapto('<Plug>VimdoitGrepProjects')
+			autocmd Filetype vimdoit nmap <buffer><leader>p	<Plug>VimdoitGrepProjects
+			noremap <unique> <script> <Plug>VimdoitGrepProjects		<SID>GrepProjects
+			noremap <SID>GrepProjects		:<c-u>call <SID>GrepProjects(v:false)<cr>
+		endif
+		
+		" Grep projects in root
+		if !hasmapto('<Plug>VimdoitGrepProjectsAll')
+			autocmd Filetype vimdoit nmap <buffer><leader>P	<Plug>VimdoitGrepProjectsAll
+			noremap <unique> <script> <Plug>VimdoitGrepProjectsAll		<SID>GrepProjectsAll
+			noremap <SID>GrepProjectsAll		:<c-u>call <SID>GrepProjects(v:true)<cr>
+		endif
+		
+		" Grep tasks in project
+		if !hasmapto('<Plug>VimdoitGrepTasks')
+			autocmd Filetype vimdoit nmap <buffer><leader>t	<Plug>VimdoitGrepTasks
+			noremap <unique> <script> <Plug>VimdoitGrepTasks		<SID>GrepTasks
+			noremap <SID>GrepTasks		:<c-u>call <SID>GrepTasks("project")<cr>
+		endif
+		
+		" Grep tasks in cwd
+		if !hasmapto('<Plug>VimdoitGrepTasksArea')
+			autocmd Filetype vimdoit nmap <buffer><leader>t.	<Plug>VimdoitGrepTasksArea
+			noremap <unique> <script> <Plug>VimdoitGrepTasksArea		<SID>GrepTasksArea
+			noremap <SID>GrepTasksArea		:<c-u>call <SID>GrepTasks("area")<cr>
+		endif
+		
+		" Grep tasks in root
+		if !hasmapto('<Plug>VimdoitGrepTasksAll')
+			autocmd Filetype vimdoit nmap <buffer><leader>T	<Plug>VimdoitGrepTasksAll
+			noremap <unique> <script> <Plug>VimdoitGrepTasksAll		<SID>GrepTasksAll
+			noremap <SID>GrepTasksAll		:<c-u>call <SID>GrepTasks("all")<cr>
+		endif
+		
+		" Sort quickfix list
+		if !hasmapto('<Plug>VimdoitSortQuickfix')
+			autocmd Filetype qf,vimdoit nmap <buffer><leader>s	<Plug>VimdoitSortQuickfix
+			noremap <unique> <script> <Plug>VimdoitSortQuickfix		<SID>SortQuickfix
+			noremap <SID>SortQuickfix		:<c-u>call <SID>SortQuickfix()<cr>
+		endif
+
+		" Filter quickfix list
+		if !hasmapto('<Plug>VimdoitFilterQuickfix')
+			autocmd Filetype qf,vimdoit nmap <buffer><leader>f	<Plug>VimdoitFilterQuickfix
+			noremap <unique> <script> <Plug>VimdoitFilterQuickfix		<SID>FilterQuickfix
+			noremap <SID>FilterQuickfix		:<c-u>call <SID>FilterQuickfix()<cr>
+		endif
+
+		" Modify Task Prompt (Normal)
+		if !hasmapto('<Plug>VimdoitModifyTask')
+			autocmd Filetype vimdoit nmap <buffer>M	<Plug>VimdoitModifyTask
+			noremap <unique> <script> <Plug>VimdoitModifyTask		<SID>ModifyTask
+			noremap <SID>ModifyTask		:<c-u>call <SID>ModifyTaskPrompt('char')<cr>
+		endif
+		
+		" Modify Task Prompt (Visual)
+		if !hasmapto('<Plug>VimdoitModifyTaskVisual')
+			autocmd Filetype vimdoit vmap <buffer>M	<Plug>VimdoitModifyTaskVisual
+			noremap <unique> <script> <Plug>VimdoitModifyTaskVisual		<SID>ModifyTaskVisual
+			noremap <SID>ModifyTaskVisual		:<c-u>call <SID>ModifyTaskPrompt(visualmode())<cr>
+		endif
+
+		let g:vimdoit_did_load_mappings = 1
+
+	endif
+	
+augroup END
 
 if exists("g:vimdoit_loaded_mappings") == v:false
-	
+
 	noremap <silent> <unique> <script> <Plug>VimdoitCheckTask	<SID>CheckTask
 	noremap <SID>CheckTask		:<c-u> call <SID>CheckTask()<CR>
 	
 	noremap <silent> <unique> <script> <Plug>VimdoitUncheckTask	<SID>UncheckTask
 	noremap <SID>UncheckTask		:<c-u> call <SID>UncheckTask()<CR>
 	
-	noremap <silent> <unique> <script> <Plug>VimdoitGrepToday	<SID>GrepToday
-	noremap <SID>GrepToday		:<c-u> call <SID>GrepToday()<CR>
 	let g:vimdoit_loaded_mappings = 1
 endif
 
