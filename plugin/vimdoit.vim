@@ -46,6 +46,19 @@ endif
 let g:vimdoit_quickfix_type = 'none'
 
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+"																Utility Functions													 "
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+function! s:SetGrep()
+	let g:vdo_grep_save = &grepprg
+	set grepprg=rg\ --vimgrep
+endfunction
+
+function! s:RestoreGrep()
+	let &grepprg=g:vdo_grep_save
+endfunction
+
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 "																Writing Zettels   												 "
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
@@ -687,12 +700,8 @@ function! s:GenerateID()
 endfunction
 
 function! s:NewID()	
-	" save grep command of user
-	let l:grep_save = &grepprg
-	set grepprg=rg\ --vimgrep
-	
+	call s:SetGrep()
 	let l:id = s:GenerateID()
-	
 	" check if ID is already in use
 	silent execute "grep! '0x".l:id."'" 
 	let l:qf = getqflist()
@@ -701,10 +710,7 @@ function! s:NewID()
 		silent execute "grep! '0x".l:id."'" 
 		let l:qf = getqflist()
 	endwhile
-	
-	" restore grep command of user
-	let &grepprg=l:grep_save
-
+	call s:RestoreGrep()
 	return l:id
 endfunction
 
@@ -788,8 +794,7 @@ function! s:DataUpdateReferences()
 	call vimdoit_utility#SaveCfStack()
 
 	" save grep command of user
-	let l:grep_save = &grepprg
-	set grepprg=rg\ --vimgrep
+	call s:SetGrep()
 
 	execute "cd ".g:vimdoit_projectsdir
 
@@ -840,7 +845,6 @@ function! s:DataUpdateReferences()
 
 		" check if line has a repetition, then update its auto-generated references
 		if s:HasRepetition(l:line) == v:true
-			echom "repetition: ".l:line
 			silent execute 'grep! --hidden --type-add '"vimdoit:*.vdo"' -t vimdoit "\s0x'.l:id_grep.'\\|\d+"' 
 			let l:qf = getqflist()
 			
@@ -881,7 +885,7 @@ function! s:DataUpdateReferences()
 	execute "update!"
 	
 	" restore grep command of user
-	let &grepprg=l:grep_save
+	call s:RestoreGrep()
 
 	" restore buffer
 	execute "buffer ".l:save_buffer
@@ -1564,7 +1568,7 @@ function! s:ParseProjectFile()
 		let l:last_section        = s:DataUpdateEndOfEachSection(s:project_tree["sections"])
 		let l:last_section['end'] = line('$')
 
-	catc
+	catch
 		echom "vimdoit:  Exception  in ".v:throwpoint.":"
 		echom v:exception
 	endtry
@@ -1809,7 +1813,6 @@ endfunction
 
 function! s:GrepProjectsByTag(tag, path)
 
-	call vimdoit_utility#SaveCfStack()
 	call vimdoit_utility#SaveOptions()
 	
 	execute "cd ".a:path
@@ -1850,7 +1853,8 @@ function! s:GrepTasksWithInvalidAppointment(path)
 	call vimdoit_utility#SaveCfStack()
 	call vimdoit_utility#SaveOptions()
 
-	" TODO set grep format
+	" set grep format
+	call s:SetGrep()
 	
 	if a:path ==# '%'
 		let datefile = s:GetDatefileName()
@@ -1866,6 +1870,9 @@ function! s:GrepTasksWithInvalidAppointment(path)
 	let l:qf_all = getqflist()
 
 	if len(l:qf_all) == 0
+		call vimdoit_utility#RestoreCfStack()
+		call vimdoit_utility#RestoreOptions()
+		call s:RestoreGrep()
 		return
 	endif
 
@@ -1876,6 +1883,9 @@ function! s:GrepTasksWithInvalidAppointment(path)
 	let l:qf_valid = getqflist()
 
 	if len(l:qf_valid) == 0
+		call vimdoit_utility#RestoreCfStack()
+		call vimdoit_utility#RestoreOptions()
+		call s:RestoreGrep()
 		return
 	endif
 
@@ -1904,6 +1914,7 @@ function! s:GrepTasksWithInvalidAppointment(path)
 	call setqflist(l:qf_new, 'a')
 	
 	call vimdoit_utility#RestoreOptions()
+	call s:RestoreGrep()
 endfunction
 
 function! s:HasRange(text)
@@ -1981,8 +1992,8 @@ endfunction
 
 function! s:GrepTasksByStatus(status, path)
 
-	call vimdoit_utility#SaveCfStack()
 	call vimdoit_utility#SaveOptions()
+	call s:SetGrep()
 
 	if a:path ==# '%'
 		let datefile = s:GetDatefileName()
@@ -2052,6 +2063,7 @@ function! s:GrepTasksByStatus(status, path)
 	call setqflist(l:qf, 'r')	
 
 	call vimdoit_utility#RestoreOptions()
+	call s:RestoreGrep()
 endfunction
 
 function! s:GrepProjects(all)
@@ -2428,6 +2440,7 @@ endfunction
 
 function! s:GenerateBlockID()
 	call vimdoit_utility#SaveCfStack()
+	call s:SetGrep()
 	
 	function! CmpByNumber(n1, n2)
 		let n1 = a:n1 + 0
@@ -2442,6 +2455,8 @@ function! s:GenerateBlockID()
 
 	if len(qf) == 0
 		" no existing blocks
+		call vimdoit_utility#RestoreCfStack()
+		call s:RestoreGrep()
 		return 1
 	endif
 
@@ -2449,10 +2464,10 @@ function! s:GenerateBlockID()
 	for i in qf
 		call add(ids, s:ExtractBlockId(i.text))
 	endfor
-	call sort(uniq(ids), 'CmpByNumber')
+	call sort(uniq(sort(ids)), 'CmpByNumber')
 	
 	call vimdoit_utility#RestoreCfStack()
-	
+	call s:RestoreGrep()
 	return ids[0]+1
 endfunction
 
@@ -2626,6 +2641,7 @@ function! s:WriteToDateFile(dates, id)
 	let l:save_cursor = getcurpos()
 	" save cfstack
 	call vimdoit_utility#SaveCfStack()
+	call s:SetGrep()
 
 	" compute datefile name and path
 	let datefile = s:GetDatefileName()
@@ -2711,6 +2727,7 @@ function! s:WriteToDateFile(dates, id)
 	execute "buffer ".l:save_buffer
 	" restore cursor
 	call setpos('.', l:save_cursor)
+	call s:RestoreGrep()
 
 endfunction
 
@@ -2722,6 +2739,9 @@ function s:RemoveUnusedDatesDateFile()
 		return
 	endif
 	
+	" save cursor
+	let l:save_cursor = getcurpos()
+	
 	let datefile = s:GetDatefileName()
 
 	" abort when there is no datefile
@@ -2730,6 +2750,7 @@ function s:RemoveUnusedDatesDateFile()
 	endif
 
 	call vimdoit_utility#SaveCfStack()
+	call s:SetGrep()
 
 	" get unique list of ids in use
 	execute 'silent! grep! "0x[0-9a-f]{8}" '.datefile.' '
@@ -2737,6 +2758,9 @@ function s:RemoveUnusedDatesDateFile()
 
 	" empty qf list, abort
 	if len(qf) == 0
+		call setpos('.', l:save_cursor)
+		call vimdoit_utility#RestoreCfStack()
+		call s:RestoreGrep()
 		return
 	endif
 	
@@ -2767,7 +2791,10 @@ function s:RemoveUnusedDatesDateFile()
 	endfor
 	execute 'write!'
 	
+	" restore
+	call setpos('.', l:save_cursor)
 	call vimdoit_utility#RestoreCfStack()
+	call s:RestoreGrep()
 endfunction
 
 function! s:UpdateDatesDatesFile()
@@ -2836,9 +2863,9 @@ function! s:UpdateDateFile()
 			" echom "operand:".operand
 			" echom "--"
 			
-			" add repetitions up to three months into the future
-			" we don't want do flood the datefiles with too much data, otherwise
-			" grepping will be slowed down
+			" Add repetitions into the future, but limit how many.
+			" We don't want do flood the datefiles with too much data, otherwise
+			" grepping will be slowed down.
 			if end ==# '2999-12-31'
 				let today = strftime('%Y-%m-%d')
 

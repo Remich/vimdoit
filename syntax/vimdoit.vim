@@ -146,11 +146,21 @@ syntax region TaskDone start="\v^\t{14}- \[x\]+" skip="\v^\t{15,}" end="^" conta
 syntax match TaskFailedMarker "\v\[F\]" contained
 highlight link TaskFailedMarker Error
 
-
 syntax region TaskFailed start="\v^\t{0}- \[F\]+" skip="\v^\t{1,}" end="^" contains=TaskFailedMarker,FlagID
 syntax region TaskFailed start="\v^\t{1}- \[F\]+" skip="\v^\t{2,}" end="^" contains=TaskFailedMarker,FlagID
 syntax region TaskFailed start="\v^\t{2}- \[F\]+" skip="\v^\t{3,}" end="^" contains=TaskFailedMarker,FlagID
-" TODO other Task failed levels
+syntax region TaskFailed start="\v^\t{3}- \[F\]+" skip="\v^\t{4,}" end="^" contains=TaskFailedMarker,FlagID
+syntax region TaskFailed start="\v^\t{4}- \[F\]+" skip="\v^\t{5,}" end="^" contains=TaskFailedMarker,FlagID
+syntax region TaskFailed start="\v^\t{5}- \[F\]+" skip="\v^\t{6,}" end="^" contains=TaskFailedMarker,FlagID
+syntax region TaskFailed start="\v^\t{6}- \[F\]+" skip="\v^\t{7,}" end="^" contains=TaskFailedMarker,FlagID
+syntax region TaskFailed start="\v^\t{7}- \[F\]+" skip="\v^\t{8,}" end="^" contains=TaskFailedMarker,FlagID
+syntax region TaskFailed start="\v^\t{8}- \[F\]+" skip="\v^\t{9,}" end="^" contains=TaskFailedMarker,FlagID
+syntax region TaskFailed start="\v^\t{9}- \[F\]+" skip="\v^\t{10,}" end="^" contains=TaskFailedMarker,FlagID
+syntax region TaskFailed start="\v^\t{10}- \[F\]+" skip="\v^\t{11,}" end="^" contains=TaskFailedMarker,FlagID
+syntax region TaskFailed start="\v^\t{11}- \[F\]+" skip="\v^\t{12,}" end="^" contains=TaskFailedMarker,FlagID
+syntax region TaskFailed start="\v^\t{12}- \[F\]+" skip="\v^\t{13,}" end="^" contains=TaskFailedMarker,FlagID
+syntax region TaskFailed start="\v^\t{13}- \[F\]+" skip="\v^\t{14,}" end="^" contains=TaskFailedMarker,FlagID
+syntax region TaskFailed start="\v^\t{14}- \[F\]+" skip="\v^\t{15,}" end="^" contains=TaskFailedMarker,FlagID
 
 syntax match TaskCancelledMarker "\v\[-\]" contained
 highlight link TaskCancelledMarker NerdTreeDir
@@ -161,6 +171,15 @@ syntax region TaskCancelled start="\v^\t{2}- \[-\]+" skip="\v^\t{3,}" end="^" co
 syntax region TaskCancelled start="\v^\t{3}- \[-\]+" skip="\v^\t{4,}" end="^" contains=TaskCancelledMarker,FlagID
 syntax region TaskCancelled start="\v^\t{4}- \[-\]+" skip="\v^\t{5,}" end="^" contains=TaskCancelledMarker,FlagID
 syntax region TaskCancelled start="\v^\t{5}- \[-\]+" skip="\v^\t{6,}" end="^" contains=TaskCancelledMarker,FlagID
+syntax region TaskCancelled start="\v^\t{6}- \[-\]+" skip="\v^\t{7,}" end="^" contains=TaskCancelledMarker,FlagID
+syntax region TaskCancelled start="\v^\t{7}- \[-\]+" skip="\v^\t{8,}" end="^" contains=TaskCancelledMarker,FlagID
+syntax region TaskCancelled start="\v^\t{8}- \[-\]+" skip="\v^\t{9,}" end="^" contains=TaskCancelledMarker,FlagID
+syntax region TaskCancelled start="\v^\t{9}- \[-\]+" skip="\v^\t{10,}" end="^" contains=TaskCancelledMarker,FlagID
+syntax region TaskCancelled start="\v^\t{10}- \[-\]+" skip="\v^\t{11,}" end="^" contains=TaskCancelledMarker,FlagID
+syntax region TaskCancelled start="\v^\t{11}- \[-\]+" skip="\v^\t{12,}" end="^" contains=TaskCancelledMarker,FlagID
+syntax region TaskCancelled start="\v^\t{12}- \[-\]+" skip="\v^\t{13,}" end="^" contains=TaskCancelledMarker,FlagID
+syntax region TaskCancelled start="\v^\t{13}- \[-\]+" skip="\v^\t{14,}" end="^" contains=TaskCancelledMarker,FlagID
+syntax region TaskCancelled start="\v^\t{14}- \[-\]+" skip="\v^\t{15,}" end="^" contains=TaskCancelledMarker,FlagID
 " TODO other Task failed levels
 
 highlight link TaskDone NerdTreeDir
