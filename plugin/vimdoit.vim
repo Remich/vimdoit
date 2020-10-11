@@ -23,8 +23,8 @@ if exists("g:vimdoit_projectsdir") == v:false
 	finish
 endif
 
-" check if 'dateseq' is installed
-let s:tools = ['dateseq', 'dateadd', 'dround']
+" check if dateutils are installed
+let s:tools = ['dateadd', 'dround']
 
 for t in s:tools
 	if trim(system("whereis ".t)) ==# t.":"
@@ -303,6 +303,7 @@ function! s:DataNewTask(name, linenum, level)
 				\ 'blocking' : 0,
 				\ 'tasks'		 : [],
 				\ 'flags'		 : {},
+				\ 'valid_syntax' : v:true,
 				\ }
 	return s:task
 endfunction
@@ -318,6 +319,7 @@ function! s:DataNewNote(name, linenum, level)
 				\ 'done'		 : -1,
 				\ 'tasks'	 	 : [],
 				\ 'flags'		 : {},
+				\ 'valid_syntax' : v:true,
 				\ }
 	return s:note
 endfunction
@@ -443,15 +445,15 @@ function! s:IsTaskBlocking(flags)
 	endif
 endfunction
 
-function! s:DataAddTask(name, linenum, level, flags)
+function! s:DataAddTask(name, linenum, level, flags, valid_syntax)
 	
 	let l:new = s:DataNewTask(a:name, a:linenum, a:level)	
-	let l:new['flags'] = a:flags
-	
-	let l:new['done']     = s:IsTaskDone(a:linenum)
-	let l:new['waiting']  = s:IsTaskWaiting(a:flags)
-	let l:new['blocking'] = s:IsTaskBlocking(a:flags)
-	let l:new['failed']   = s:IsTaskFailed(a:linenum)
+	let l:new['flags']        = a:flags
+	let l:new['done']         = s:IsTaskDone(a:linenum)
+	let l:new['waiting']      = s:IsTaskWaiting(a:flags)
+	let l:new['blocking']     = s:IsTaskBlocking(a:flags)
+	let l:new['failed']       = s:IsTaskFailed(a:linenum)
+	let l:new['valid_syntax'] = a:valid_syntax
 	
 	" set id as supplied in flag
 	if has_key(a:flags, 'id') == v:true && len(a:flags['id']) != 0
@@ -472,12 +474,15 @@ function! s:DataAddTask(name, linenum, level, flags)
 
 	" add task as top of `s:task_stack`
 	call s:DataStackPush(s:tasks_stack, l:new)
+
+	return l:new
 endfunction
 
-function! s:DataAddNote(name, linenum, level, flags)
+function! s:DataAddNote(name, linenum, level, flags, valid_syntax)
 	
 	let l:new = s:DataNewNote(a:name, a:linenum, a:level)	
-	let l:new['flags'] = a:flags
+	let l:new['flags']        = a:flags
+	let l:new['valid_syntax'] = a:valid_syntax
 	
 	" set id as supplied in flag
 	if has_key(a:flags, 'id') == v:true && len(a:flags['id']) != 0
@@ -757,7 +762,7 @@ function! s:DataFindChanges()
 endfunction
 
 function! s:DataGetIDOfLine(line)
-	let l:pattern = '\v0x(\x{8})'
+	let l:pattern = '\v0x(\x{8}(\|\d+)?)'
 	let l:id    = []
 	call substitute(a:line, l:pattern, '\=add(l:id, submatch(1))', 'g')
 	
@@ -800,7 +805,8 @@ function! s:DataUpdateReferences()
 		endif
 		
 		" grep for id
-		silent execute "grep! '0x".l:id."'" 
+		let l:id_grep = substitute(l:id, '\v\|', '\\\\|', '')
+		silent execute 'grep! --hidden --type-add '"vimdoit:*.vdo"' -t vimdoit "\s0x'.l:id_grep.'(\s\|$)"' 
 		let l:qf = getqflist()
 
 		" no external references: continue
@@ -811,7 +817,7 @@ function! s:DataUpdateReferences()
 		" change lines
 		for entry in l:qf
 			execute 'buffer '.entry['bufnr']
-			
+
 			" make sure that the indendation is correct
 			let l:level = s:ExtractTaskLevel(getline(entry['lnum']))
 			let l:padding = ""
@@ -825,6 +831,44 @@ function! s:DataUpdateReferences()
 		endfor
 		
 		execute 'update'
+
+		" check if line has a repetition, then update its auto-generated references
+		if s:HasRepetition(l:line) == v:true
+			echom "repetition: ".l:line
+			silent execute 'grep! --hidden --type-add '"vimdoit:*.vdo"' -t vimdoit "\s0x'.l:id_grep.'\\|\d+"' 
+			let l:qf = getqflist()
+			
+			" no external references: continue
+			if len(l:qf) == 0
+				continue
+			endif
+
+			" change lines
+			for entry in l:qf
+				execute 'buffer '.entry['bufnr']
+				let el = getline(entry['lnum'])
+				
+				" make sure that the indendation is correct
+				let l:level = s:ExtractTaskLevel(el)
+				let l:padding = ""
+				for k in range(l:level)
+					let l:padding .= "	"
+				endfor
+				
+				" extract date from el 
+				let el_date = s:ExtractDateFull(el)
+				" extract id from el
+				let el_id = s:ExtractIdFull(el)
+
+				let newline = substitute(l:line, '\v\{.*\}', el_date, 'g')
+				let newline = substitute(newline, '\v0x\zs\x{8}\ze', el_id, 'g')
+				call setline(entry['lnum'], l:padding."".trim(newline))
+				
+				execute 'update'
+			endfor
+			
+			execute 'update'
+		endif
 		
 	endfor
 
@@ -1042,14 +1086,14 @@ function! s:ExtractSectionLevel(line)
 endfunction
 
 function! s:ExtractStartDateOfRepetition(line)
-	let l:pattern = '\v\{.*\zs\d{4}-\d{2}-\d{2}\ze.*\|[a-z]{1,2}:.*(\|.*)?\}'
+	let l:pattern = '\v\{.*\zs\d{4}-\d{2}-\d{2}\ze.*\|[a-z]{1,2}:.*\}'
 	let l:startdate    = []
 	call substitute(a:line, l:pattern, '\=add(l:startdate, submatch(0))', 'g')
 	return trim(l:startdate[0])
 endfunction
 
 function! s:ExtractEndDateOfRepetition(line)
-	let l:pattern = '\v\{.*\d{4}-\d{2}-\d{2}.*\|[a-z]{1,2}:.*\|\zs\d{4}-\d{2}-\d{2}\ze\}'
+	let l:pattern = '\v\{.*\d{4}-\d{2}-\d{2}.*\|[a-z]{1,2}:.*\|\zs\d{4}-\d{2}-\d{2}\ze.*\}'
 	let l:enddate    = []
 	call substitute(a:line, l:pattern, '\=add(l:enddate, submatch(0))', 'g')
 
@@ -1060,32 +1104,84 @@ function! s:ExtractEndDateOfRepetition(line)
 	endif
 endfunction
 
+function! s:ExtractTimeOfRepetition(line)
+	let l:pattern = '\v\{.*\zs\d{2}:\d{2}\ze.*\}'
+	let l:time    = []
+	call substitute(a:line, l:pattern, '\=add(l:time, submatch(0))', 'g')
+
+	if len(l:time) == 0
+		return ''
+	else
+		return ' '.trim(l:time[0])
+	endif
+endfunction
+
 function! s:ExtractRepetitionOperator(line)
-	let l:pattern = '\v\{.*\d{4}-\d{2}-\d{2}.*\|\zs[a-z]{1,2}\ze:.*(\|.*)?\}'
+	let l:pattern = '\v\{.*\|\zs[a-z]{1,2}\ze:.*\}'
 	let l:operator    = []
 	call substitute(a:line, l:pattern, '\=add(l:operator, submatch(0))', 'g')
 	return trim(l:operator[0])
 endfunction
 
 function! s:ExtractRepetitionOperand(line)
-	let l:pattern = '\v\{.*\d{4}-\d{2}-\d{2}.*\|[a-z]{1,2}:\zs.{-}\ze(\|.*)?\}'
+	let l:pattern = '\v\{.*\|[a-z]{1,2}:\zs\d+\ze.*\}'
 	let l:operand    = []
 	call substitute(a:line, l:pattern, '\=add(l:operand, submatch(0))', 'g')
 	return trim(l:operand[0])
 endfunction
 
-function! s:ExtractStartDate(line)
-	let l:pattern = '\v\{.*\zs\d{4}-\d{2}-\d{2}\ze.*\}-\{.*\d{4}-\d{2}-\d{2}.*\}'
-	let l:startdate    = []
-	call substitute(a:line, l:pattern, '\=add(l:startdate, submatch(0))', 'g')
-	return trim(l:startdate[0])
+function! s:ExtractDate(line)
+	let l:pattern = '\v\{.*\zs\d{4}-\d{2}-\d{2}\ze.*\}'
+	let l:date    = []
+	call substitute(a:line, l:pattern, '\=add(l:date, submatch(0))', 'g')
+	return trim(l:date[0])
 endfunction
 
-function! s:ExtractEndDate(line)
-	let l:pattern = '\v\{.*\d{4}-\d{2}-\d{2}.*\}-\{.*\zs\d{4}-\d{2}-\d{2}\ze.*\}'
-	let l:enddate    = []
-	call substitute(a:line, l:pattern, '\=add(l:enddate, submatch(0))', 'g')
-	return trim(l:enddate[0])
+function! s:ExtractDateExact(line)
+	let l:pattern = '\v\{\zs\d{4}-\d{2}-\d{2}\ze\}'
+	let l:date    = []
+	call substitute(a:line, l:pattern, '\=add(l:date, submatch(0))', 'g')
+
+	if len(l:date) == 0
+		return '-1'
+	else
+		return trim(l:date[0])
+	endif
+endfunction
+
+function! s:ExtractDateFull(line)
+	let l:pattern = '\v\{.*\}'
+	let l:datefull    = []
+	call substitute(a:line, l:pattern, '\=add(l:datefull, submatch(0))', 'g')
+	return trim(l:datefull[0])
+endfunction
+
+function! s:ExtractDateFuller(line)
+	let l:pattern = '\v\zs\{.*\}\ze'
+	let l:datefull    = []
+	call substitute(a:line, l:pattern, '\=add(l:datefull, submatch(0))', 'g')
+	return trim(l:datefull[0])
+endfunction
+
+function! s:ExtractDateId(line)
+	let l:pattern = '\v0x\x{8}\|\zs\d+\ze'
+	let l:dateid    = []
+	call substitute(a:line, l:pattern, '\=add(l:dateid, submatch(0))', 'g')
+	return trim(l:dateid[0])
+endfunction
+
+function! s:ExtractId(line)
+	let l:pattern = '\v0x\zs\x{8}\ze'
+	let l:id    = []
+	call substitute(a:line, l:pattern, '\=add(l:id, submatch(0))', 'g')
+	return trim(l:id[0])
+endfunction
+
+function! s:ExtractIdFull(line)
+	let l:pattern = '\v0x\zs\x{8}(\|\d+)?\ze'
+	let l:id    = []
+	call substitute(a:line, l:pattern, '\=add(l:id, submatch(0))', 'g')
+	return trim(l:id[0])
 endfunction
 
 function! s:ExtractTaskName(line)
@@ -1262,6 +1358,114 @@ function! s:IsTaskDone(linenum)
 	endif
 endfunction
 
+""""""""""""""""""""""""""
+"				Validation			 "
+""""""""""""""""""""""""""
+
+function! s:ValidateStartDate(start, line)
+	if a:start !~# '\v\d{4}-\d{2}-\d{2}'
+		echoe "Invalid Start Date in: ".a:line
+		return v:false
+	else
+		return v:true
+	endif
+endfunction
+
+function! s:ValidateEndDate(end, line)
+	if a:start !~# '\v\d{4}-\d{2}-\d{2}'
+		echoe "Invalid End Date in: ".a:line
+		return v:false
+	else
+		return v:true
+	endif
+endfunction
+
+function! s:ValidateTime(time, line)
+	if a:start !~# '\v\d{2}:\d{2}'
+		echoe "Invalid Time in:".a:line
+		return v:false
+	else
+		return v:true
+	endif
+endfunction
+
+function! s:ValidateOperator(operator, line)
+	let valid_operators = ['y', 'mo', 'w', 'd']
+	if s:IsInList(a:operator, valid_operators) == v:false
+		echoe "Invalid Operator in:".a:line
+		return v:false
+	else
+		return v:true
+	endif
+endfunction
+
+function! s:ValidateOperand(operand, line)
+	if a:operand !~# '\v\d+'	
+		echoe "Invalid Operand in:".a:line
+		return v:false
+	else
+		return v:true
+	endif
+endfunction
+
+function! s:ValidateDateNumber(line)
+	let l:pattern = '\v\{.{-}\}'
+	let l:dates    = []
+	call substitute(a:line, l:pattern, '\=add(l:dates, submatch(0))', 'g')
+	if len(l:dates) > 1
+		return v:true
+	else
+		return v:false
+	endif
+endfunction
+
+function! s:ValidateTask(line)
+	" remove everyhing between ``
+	let line = substitute(a:line, '\v`[^`]{-}`', '', 'g')
+	
+	" check if the task has more than one date (date or repetition)
+	if s:ValidateDateNumber(line) == v:true
+		echo "ERROR"
+		throw "Task/Note has multiple dates: ".a:line
+	endif
+
+	" check if the task has a date or repetition
+	if s:HasDateOrRepetition(line) == v:true
+
+		let date = s:ExtractDateFuller(line)
+		let pass = v:false
+
+		" check if it is a valid date
+		if date =~# '\v\{((Mon|Tue|Wed|Thu|Fri|Sat|Sun): )?\d{4}-\d{2}-\d{2}\}'
+			let pass = v:true
+		" check if it is a valid date with time
+		elseif date =~# '\v\{((Mon|Tue|Wed|Thu|Fri|Sat|Sun): )?\d{4}-\d{2}-\d{2} \d{2}:\d{2}\}'
+			let pass = v:true
+		" check if it is a valid repetition (case 1)
+		elseif date =~# '\v\{((Mon|Tue|Wed|Thu|Fri|Sat|Sun): )?\d{4}-\d{2}-\d{2}\|(y|mo|w|d):\d+\}'
+			let pass = v:true
+		" check if it is a valid repetition (case 1 with time)
+		elseif date =~# '\v\{((Mon|Tue|Wed|Thu|Fri|Sat|Sun): )?\d{4}-\d{2}-\d{2}\|(y|mo|w|d):\d+\ \d{2}:\d{2}\}'
+			let pass = v:true
+		" check if it is a valid repetition (case 2)
+		elseif date =~# '\v\{((Mon|Tue|Wed|Thu|Fri|Sat|Sun): )?\d{4}-\d{2}-\d{2}\|(y|mo|w|d):\d+\|\d{4}-\d{2}-\d{2}\}'
+			let pass = v:true
+		" check if it is a valid repetition (case 2 with time)
+		elseif date =~# '\v\{((Mon|Tue|Wed|Thu|Fri|Sat|Sun): )?\d{4}-\d{2}-\d{2}\|(y|mo|w|d):\d+\|\d{4}-\d{2}-\d{2} \d{2}:\d{2}\}'
+			let pass = v:true
+		endif
+
+		if pass == v:false
+			echoe "Task has an invalid date or repetition: ".a:line
+			return v:false
+		endif
+	
+	endif
+
+	return v:true
+	
+endfunction
+
 " Iterates over every line of the file exactly once!
 command! ParseFile :call s:ParseProjectFile()
 function! s:ParseProjectFile()
@@ -1327,8 +1531,7 @@ function! s:ParseProjectFile()
 				let l:task_name  = s:ExtractTaskName(l:line)
 				let l:task_level = s:ExtractTaskLevel(l:line)
 				let l:flags      = s:ExtractTaskFlags(l:line)
-				call s:DataAddTask(l:task_name, l:i, l:task_level, l:flags)
-
+				let l:newtask    = s:DataAddTask(l:task_name, l:i, l:task_level, l:flags, s:ValidateTask(l:line))
 				let l:i += 1
 				continue
 			endif
@@ -1338,7 +1541,9 @@ function! s:ParseProjectFile()
 				let l:note_name   = s:ExtractNoteName(l:line)
 				let l:note_level  = s:ExtractNoteLevel(l:line)
 				let l:flags				= s:ExtractNoteFlags(l:line)
-				call s:DataAddNote(l:note_name, l:i, l:note_level, l:flags)
+				call s:DataAddNote(l:note_name, l:i, l:note_level, l:flags, s:ValidateTask(l:line))
+				let l:i += 1
+				continue
 			endif
 
 			" is line a Link?
@@ -1347,6 +1552,8 @@ function! s:ParseProjectFile()
 				let l:link_section = s:ExtractLinkSection(l:line)
 				let l:link_level   = s:ExtractLinkLevel(l:line)
 				call s:DataAddLink(l:link_project, l:link_section, l:i, l:link_level, {})
+				let l:i += 1
+				continue
 			endif
 
 			let l:i += 1
@@ -1355,9 +1562,9 @@ function! s:ParseProjectFile()
 		let l:last_section        = s:DataUpdateEndOfEachSection(s:project_tree["sections"])
 		let l:last_section['end'] = line('$')
 
-	catch
+	catc
 		echom "vimdoit:  Exception  in ".v:throwpoint.":"
-		echom "   ".v:exception	
+		echom v:exception
 	endtry
 
 endfunction
@@ -1365,6 +1572,12 @@ endfunction
 function! s:AfterProjectChange()
 
 	try
+
+		" skip when this is a datefile
+		let basename = expand('%:t:r')
+		if basename =~# '\v\..*-date'
+			return
+		endif
 		
 		call s:ParseProjectFile()
 		call s:DataUpdateReferences()
@@ -1388,6 +1601,8 @@ augroup VimDoit
 	" won't work
 	autocmd BufEnter *.vdo setlocal noswapfile
 	autocmd BufWritePre *.vdo call s:AfterProjectChange()
+	autocmd BufWritePost *.vdo call s:UpdateDateFile()
+	autocmd BufWritePost *.vdo call s:RemoveUnusedDatesDateFile()
 	
 	if !hasmapto('<Plug>VimdoitCheckTask')
 		autocmd Filetype vimdoit nmap <buffer> <leader>X	<Plug>VimdoitCheckTask
@@ -1669,7 +1884,8 @@ function! s:GrepTasksWithInvalidAppointment(path)
 	" TODO set grep format
 	
 	if a:path ==# '%'
-		let file = '%'
+		let datefile = s:GetDatefileName()
+		let file = '% '.datefile
 	else
 		let file = ''
 		execute "cd ".a:path
@@ -1729,90 +1945,69 @@ function! s:HasRange(text)
 	endif
 endfunction
 
-
-function! s:HasRepetition(text)
-	" check if entry has repetition
-	if a:text =~# '\v\{.*\|[a-z]{1,2}:.*(\|.*)?\}'		
+function! s:HasDateOrRepetition(text)
+	if a:text =~# '\v\{.*\}'		
 		return v:true
 	else
 		return v:false
 	endif
 endfunction
 
-function! s:InterpolateDates(qf)
+function! s:HasRepetition(text)
+	" check if entry has repetition
+	if a:text =~# '\v\{.*\|[a-z]{1,2}:.*\}'		
+		return v:true
+	else
+		return v:false
+	endif
+endfunction
+
+function! s:NicenQfByDate(qf)
 	
-	" ranges
-	let new_qf = []
-	for i in a:qf
-		" check if entry has a range
-		if s:HasRange(i.text) == v:true
-			" extract start date
-			let start = s:ExtractStartDate(i.text)
-			" extract end date
-			let end = s:ExtractEndDate(i.text)
-			" compute interpolated dates
-			let seq = split(system('dateseq '.shellescape(start).' '.shellescape(end)), '\v\n')
-			" add interpolated dates
-			for j in seq
-				let tmp = copy(i)
-				let tmp.text = substitute(i.text, '\v\{.*\d{4}-\d{2}-\d{2}.*\}-\{.*\d{4}-\d{2}-\d{2}.*\}', '{'.j.'}', '')
-				call add(new_qf, tmp)
-			endfor
-		else
-			call add(new_qf, i)
+	let idx = 0
+	let day_prev = ''
+	let week_prev = ''
+	let month_prev = ''
+	let year_prev = ''
+	while idx < len(a:qf)
+
+		let date = s:ExtractDate(a:qf[idx].text)
+		let day = trim(system('date --date='.date.' +%A'))
+		let week = trim(system('date --date='.date.' +%V'))
+		let month = trim(system('date --date='.date.' +%B'))
+		let year = trim(system('date --date='.date.' +%Y'))
+
+		let inc = 1
+		let insert = []
+
+		if day_prev !=# day
+			call add(insert, ''.day.':')
 		endif
-	endfor
-
-	" repetitions
-	let new_new_qf = []
-	for i in new_qf
-		" check if entry has repetition
-		if s:HasRepetition(i.text) == v:true
-			" extract start date
-			let start = s:ExtractStartDateOfRepetition(i.text)
-			" extract end date
-			let end = s:ExtractEndDateOfRepetition(i.text)
-			" extract repetition operator
-			let operator = s:ExtractRepetitionOperator(i.text)
-			" extract repetition operand
-			let operand = s:ExtractRepetitionOperand(i.text)
-
-			" add repetitions up to three months into the future
-			let today = strftime('%Y-%m-%d')
-			let limit = system('dateadd '.shellescape(today).' +3mo')
-			let cur = start
-				while cur <=# limit && cur <=# end
-
-				let tmp = copy(i)
-				let tmp.text = substitute(i.text, '\v\{.*\|[a-z]{1,2}:.*(\|.*)?\}', '{'.cur.'}', '')
-
-				" check if there exists an entry which is being interpolated, use the
-				" existing one instead
-				let grep_text = substitute(i.text, '\v\{.*\|[a-z]{1,2}:.*(\|.*)?\}', '\\{'.cur.'\\}', '')
-				let grep_text = substitute(grep_text, '\v^\s*- \[.\]\s', '', '')
-				let grep_text = substitute(grep_text, '\v\s*--.*$', '', '')
-				
-				" grep
-				execute 'silent! grep! --type-add '"vimdoit:*.vdo"' -t vimdoit "'.grep_text.'"' | copen
-
-				let tmp_qf = getqflist()
-				if len(tmp_qf) > 0
-					" yes: don't do anything, existing entry will be grepped automatically
-				else
-					" no: use interpolated entry
-					call add(new_new_qf, tmp)
-				endif
-				
-				" date addition
-				let cur = trim(system('dateadd '.shellescape(cur).' +'.operand.operator))	
-			endwhile
-				
-		else
-			call add(new_new_qf, i)
+		
+		if week_prev !=# week
+			call add(insert, '--------------------------------------')
+			call add(insert, ' -							Woche '.week.'						  -')
+			call add(insert, '--------------------------------------')
 		endif
-	endfor
+		
+		if month_prev !=# month
+			call add(insert, '======================================')
+			call add(insert, '=						'.month.' '.year.'						=')
+			call add(insert, '======================================')
+		endif
+		
+		for i in insert
+			call insert(a:qf, {'text' : i}, idx)
+			let inc = inc + 1
+		endfor
 
-	return new_new_qf
+		let idx = idx + inc
+		let day_prev = day
+		let week_prev = week
+		let month_prev = month
+		let year_prev = year
+	endwhile
+	
 endfunction
 
 function! s:GrepTasksByStatus(status, path)
@@ -1821,7 +2016,8 @@ function! s:GrepTasksByStatus(status, path)
 	call vimdoit_utility#SaveOptions()
 
 	if a:path ==# '%'
-		let file = '%'
+		let datefile = s:GetDatefileName()
+		let file = '% '.datefile
 	else
 		let file = ''
 		execute "cd ".a:path
@@ -1835,42 +2031,43 @@ function! s:GrepTasksByStatus(status, path)
 	elseif a:status ==# 'todo'
 		let pattern = "\\- \\[ \\]" 
 		let title = 'tasks: todo'
-	elseif a:status ==# 'next'
-		let pattern = "[\\#]next"
-		let title = 'tasks: #next'
-	elseif a:status ==# 'current'
-		let pattern = "[\\#]cur"
-		let title = 'tasks: #cur'
-	elseif a:status ==# 'scheduled'
-		let pattern = "\\{.*\\}"
-		let title = 'tasks: scheduled'
-	elseif a:status ==# 'appointment'
-		let pattern = "\\{.*\\d{4}-\\d{2}-\\d{2}.*\\}"
-		let title = 'tasks: appointment'
 	elseif a:status ==# 'done'
 		let pattern = "\\- \\[x\\]"
 		let title = 'tasks: done'
-	elseif a:status ==# 'waiting'
-		let pattern = "~\\d+"
-		let title = 'tasks: waiting'
-	elseif a:status ==# 'block'
-		let pattern = "[$]\\d+"
-		let title = 'tasks: block'
 	elseif a:status ==# 'failed'
 		let pattern = "\\- \\[F\\]"
 		let title = 'tasks: failed'
 	elseif a:status ==# 'cancelled'
 		let pattern = "\\- \\[-\\]"
 		let title = 'tasks: cancelled'
+	elseif a:status ==# 'next'
+		let pattern = "[\\#]next"
+		let title = 'tasks: #next'
+	elseif a:status ==# 'current'
+		let pattern = "[\\#]cur"
+		let title = 'tasks: #cur'
+	elseif a:status ==# 'waiting'
+		let pattern = "~\\d+"
+		let title = 'tasks: waiting'
+	elseif a:status ==# 'block'
+		let pattern = "[$]\\d+"
+		let title = 'tasks: block'
+	elseif a:status ==# 'scheduled'
+		let pattern = "\\{.*\\}"
+		let title = 'tasks: scheduled'
+	elseif a:status ==# 'appointment'
+		let pattern = "\\{\\s*\\d{4}-\\d{2}-\\d{2}(\\s*\\d{2}:\\d{2})?\\s*\\}"
+		let title = 'tasks: appointment'
+	elseif a:status ==# 'repetition'
+		let pattern = "\\{\\s*\\d{4}-\\d{2}-\\d{2}\\\\|[a-z]{1,2}:.*\\}"
+		let title = 'tasks: repetition'
 	endif
 	
 	execute 'silent! grep! --pre '.g:vimdoit_plugindir.'/scripts/pre-project.sh --type-add '"vimdoit:*.vdo"' -t vimdoit "'.pattern.'" '.file | copen
 
 	let l:qf = getqflist()
-	
+
 	if a:status ==# 'appointment'
-		" interpolate date ranges and repeating dates
-		let l:qf = s:InterpolateDates(l:qf)
 		" sort by date
 		call sort(l:qf, 's:CmpQfByDate')
 		let title = s:ModifyQfTitle(title, 'add', 'sort', 'date')
@@ -1884,7 +2081,7 @@ function! s:GrepTasksByStatus(status, path)
 	
 	" push list
 	call setqflist(l:qf, 'r')	
-		
+
 	call vimdoit_utility#RestoreOptions()
 endfunction
 
@@ -1947,30 +2144,32 @@ function! s:GrepTasks(where)
 	let selections = [
 				\ 'all',
 				\ 'todo',
+				\ 'done',
+				\ 'failed',
+				\ 'cancelled',
 				\ 'next',
 				\ 'current',
 				\ 'waiting',
 				\ 'block',
 				\ 'scheduled',
 				\ 'appointment',
+				\ 'repetition',
 				\ 'invalid appointment',
-				\ 'done',
-				\ 'failed',
-				\ 'cancelled',
 				\ ]
 	let selections_dialog = [
 				\ '&all',
 				\ '&todo',
+				\ '&done',
+				\ '&failed',
+				\ '&cancelled',
 				\ '&next',
 				\ 'cu&rrent',
 				\ '&waiting',
 				\ '&block',
 				\ '&scheduled',
 				\ 'a&ppointment',
+				\ 'r&epetition',
 				\ '&invalid appointment',
-				\ '&done',
-				\ '&failed',
-				\ '&cancelled',
 				\ ]
 	
 	let input = confirm('Searching Tasks in '.shellescape(path_nicened).'', join(selections_dialog, "\n"))
@@ -2132,6 +2331,7 @@ function! s:FilterQuickfix()
 				\ 'upcoming*',
 				\ 'past*',
 				\ 'not in completed/cancelled/archived projects',
+				\ 'add headings',
 				\ ]
 	let selections_dialog = [
 				\ '&todo',
@@ -2147,6 +2347,7 @@ function! s:FilterQuickfix()
 				\ 'u&pcoming*',
 				\ 'p&ast*',
 				\ '&not in completed/cancelled/archived projects',
+				\ 'add headin&gs',
 				\ ]
 	let input  = confirm('Filter Quickfix List by', join(selections_dialog, "\n"))
 
@@ -2204,11 +2405,34 @@ function! s:FilterQuickfix()
 		endif
 	elseif selections[input-1] ==# 'not in completed/cancelled/archived projects'
 		echoe "Not implemented"
+	elseif selections[input-1] ==# 'add headings'
+		if g:vimdoit_quickfix_type ==# 'appointment'
+			call s:NicenQfByDate(l:qf)
+		else
+			echoe "Quickfix List is not of type appointment."
+		endif
 	endif
 	
 	" push list
 	call setqflist(l:qf)	
 	
+endfunction
+
+function! s:JumpToToday()
+
+	if g:vimdoit_quickfix_type !=# 'appointment'
+		echoe "Quickfix List is not of type appointment."
+		return
+	endif
+	
+	" jump to today
+	let today = strftime('%Y-%m-%d')
+	while search('\v'.today) == 0 
+		let today = trim(system('dateadd '.shellescape(today).' +1d'))
+	endwhile
+
+	execute "normal! 0"
+		
 endfunction
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -2398,6 +2622,295 @@ function! s:ModifyTaskPrompt(type)
 endfunction
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+"                               Date File                               "
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+function! s:IsInList(needle, haystack)
+	for i in a:haystack
+		if a:needle ==# i.date
+			return v:true
+		endif
+	endfor
+	return v:false
+endfunction
+
+function! s:IsInQfList(needle, haystack)
+	for i in a:haystack
+		let date = s:ExtractDate(i.text)
+		if a:needle ==# date
+			return v:true
+		endif
+	endfor
+	return v:false
+endfunction
+
+function! s:GetDatefileName()
+	let filepath = expand('%:h')
+	let filename = expand('%:t:r')
+	return filepath.'/.'.filename.'-dates.vdo'	
+endfunction
+
+function! s:WriteToDateFile(dates, id)
+	" save buffer
+	let l:save_buffer = bufnr()
+	" save cursor
+	let l:save_cursor = getcurpos()
+	" save cfstack
+	call vimdoit_utility#SaveCfStack()
+
+	" compute datefile name and path
+	let datefile = s:GetDatefileName()
+
+	" check if datefile exists, if not create it
+	if exists(datefile) == v:false
+		call system('touch '.datefile)
+	endif
+
+	" 1. grep all existing dates in datefile with same id
+	execute 'silent! grep! "'.a:id.'" '.datefile
+
+	" 2. delete existing dates, if they are not within range 
+	"		 (date of task might have been changed)
+	let qf        = getqflist()
+	let to_delete = []
+
+	execute 'edit! '.datefile
+
+	" 2.1 check which dates to delete
+	for i in qf
+		let d = s:ExtractDate(i.text)
+		if s:IsInList(d, a:dates) == v:false
+			call add(to_delete, s:ExtractIdFull(getline(i.lnum)))
+		endif
+	endfor
+
+	if len(to_delete) > 0
+		" 2.2 deletion
+		for i in to_delete
+			let id = substitute(i, '\v\|', '\\|', '')
+			execute 'global/\v0x'.id.'/delete'
+		endfor
+		execute 'write!'
+	endif
+	
+	"	3. insert dates, which are not already present in any project
+	" 3.1 grep in all files
+	execute 'silent! grep! --type-add '"vimdoit:*.vdo"' -t vimdoit "'.a:id.'\\|\d+"'
+	let to_insert = []
+	let qf        = getqflist()
+
+	" 3.2 check which dates to insert
+	if len(qf) == 0
+		let to_insert = a:dates
+		let id_new = 0
+	else
+		for i in a:dates
+			if s:IsInQfList(i.date, qf) == v:false
+				call add(to_insert, i)
+			endif
+		endfor
+		
+		" find highest date-id in use
+		function! CmpQfByDateId(e1, e2)
+			let [t1, t2] = [s:ExtractDateId(a:e1.text) + 0, s:ExtractDateId(a:e2.text) + 0]
+			return t1 < t2 ? 1 : t1 == t2 ? 0 : -1
+		endfunction
+		call sort(qf, 'CmpQfByDateId')
+		let id_new = s:ExtractDateId(qf[0].text) + 1
+	endif
+
+	if len(to_insert) > 0
+		" open
+		execute "edit ".datefile
+
+		" append
+		for i in to_insert
+			let text = substitute(i.text, '\v0x\x{8}', '0x'.a:id.'|'.id_new, '')
+			call append(line('$'), text)
+			let id_new = id_new + 1
+		endfor
+
+		" write
+		execute 'write'
+		
+		" TODO maybe close buffer?
+	endif
+
+	" restore cfstack
+	call vimdoit_utility#RestoreCfStack()
+	" restore buffer
+	execute "buffer ".l:save_buffer
+	" restore cursor
+	call setpos('.', l:save_cursor)
+
+endfunction
+
+function s:RemoveUnusedDatesDateFile()
+
+	" abort when this is a datefile
+	let basename = expand('%:t:r')
+	if basename =~# '\v\..*-date'
+		return
+	endif
+	
+	let datefile = s:GetDatefileName()
+
+	" abort when there is no datefile
+	if filereadable(datefile) == v:false
+		return
+	endif
+
+	call vimdoit_utility#SaveCfStack()
+
+	" get unique list of ids in use
+	execute 'silent! grep! "0x[0-9a-f]{8}" '.datefile.' '
+	let qf = getqflist()
+
+	" empty qf list, abort
+	if len(qf) == 0
+		return
+	endif
+	
+	" extract ids
+	let ids = []
+	for i in qf
+		call add(ids, s:ExtractId(i.text))	
+	endfor
+	
+	" make unique
+	call uniq(sort(ids))
+
+	" check if those ids still exist
+	let rm = []
+	for i in ids
+		let pattern = '0x'.i
+		execute 'silent! grep! --type-add '"vimdoit:*.vdo"' -t vimdoit -g "!.*" "'.pattern.'"'
+		let qf = getqflist()
+		if len(qf) == 0
+			call add(rm, i)
+		endif
+	endfor
+
+	" actual removal
+	execute 'edit! '.datefile
+	for i in rm
+		execute 'silent! global/\v0x'.i.'/delete'
+	endfor
+	execute 'write!'
+	
+	call vimdoit_utility#RestoreCfStack()
+endfunction
+
+function! s:UpdateDatesDatesFile()
+	let save_cursor = getcurpos()
+	let save_file = expand('%')
+	execute 'args ./**/*\.vdo'
+	execute 'bufdo write!'
+	execute '%bdelete!'
+	execute 'edit '.save_file
+	call setpos('.', save_cursor)
+endfunction
+command! -nargs=0 VdoUpdateDates	:call s:UpdateDatesDatesFile()
+
+function! s:SortDateFile()
+	let save_cursor = getcurpos()
+	let save_file = expand('%')
+	let datefile = s:GetDatefileName()
+	execute 'edit! '.datefile
+	execute '%sort'
+	execute 'write!'
+	let buf = bufnr()
+	execute 'edit '.save_file
+	call setpos('.', save_cursor)
+	execute buf.'bdelete!'
+endfunction
+	
+function! s:UpdateDateFile()
+	
+	" skip when this is a datefile
+	let basename = expand('%:t:r')
+	if basename =~# '\v\..*-date'
+		return
+	endif
+
+	" get all tasks/notes
+	let l:tasks = { 'items' : [] }
+	call s:DataGetAllTasksAndNotes(s:project_tree, l:tasks)
+	
+	" decide what to do
+	for item in l:tasks['items']
+
+		" abort if task/note has invalid syntax
+		if item.valid_syntax == v:false
+			continue
+		endif
+	
+		" check if task has a repetition
+		if s:HasRepetition(item.name) == v:true
+			let dates = []
+			" extract start date
+			let start = s:ExtractStartDateOfRepetition(item.name)
+			" extract end date
+			let end = s:ExtractEndDateOfRepetition(item.name)
+			" extract time
+			let time = s:ExtractTimeOfRepetition(item.name)
+			" extract repetition operator
+			let operator = s:ExtractRepetitionOperator(item.name)
+			" extract repetition operand
+			let operand = s:ExtractRepetitionOperand(item.name)
+
+			" echom "line:".item.name
+			" echom "start:".start
+			" echom "end:".end
+			" echom "time:".time
+			" echom "operator:".operator
+			" echom "operand:".operand
+			" echom "--"
+			
+			" add repetitions up to three months into the future
+			" we don't want do flood the datefiles with too much data, otherwise
+			" grepping will be slowed down
+			if end ==# '2999-12-31'
+				let today = strftime('%Y-%m-%d')
+
+				if operator ==# 'd'
+					let limit = trim(system('dateadd '.shellescape(today).' +3mo'))
+				elseif operator ==# 'w'
+					let limit = trim(system('dateadd '.shellescape(today).' +6mo'))
+				elseif operator ==# 'mo'
+					let limit = trim(system('dateadd '.shellescape(today).' +2y'))
+				elseif operator ==# 'y'
+					let limit = trim(system('dateadd '.shellescape(today).' +30y'))
+				else
+					let limit = trim(system('dateadd '.shellescape(today).' +3mo'))
+				endif
+				
+			else
+				let limit = end
+			endif
+				
+			let cur   = start
+			while cur <=# limit && cur <=# end
+				let text = substitute(item.name, '\v\{.*\|[a-z]{1,2}:.*(\|.*)?\}', '{'.cur.time.'}', '')
+				if item.type ==# 'task'
+					let text = '- [ ] '.text
+				elseif item.type ==# 'note'
+					let text = '- '.text
+				endif
+				call add(dates, { 'text' : text, 'date' : cur })
+				" date addition
+				let cur = trim(system('dateadd '.shellescape(cur).' +'.operand.operator))	
+			endwhile
+			" write interpolated dates to datefile
+			call s:WriteToDateFile(dates, item.id)
+			call s:SortDateFile()
+		endif
+		
+	endfor
+
+endfunction
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 "                               Mappings                                "
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
@@ -2467,6 +2980,13 @@ augroup vimdoit
 			autocmd Filetype vimdoit vmap <buffer>M	<Plug>VimdoitModifyTaskVisual
 			noremap <unique> <script> <Plug>VimdoitModifyTaskVisual		<SID>ModifyTaskVisual
 			noremap <SID>ModifyTaskVisual		:<c-u>call <SID>ModifyTaskPrompt(visualmode())<cr>
+		endif
+		
+		" Jump in Quickfix List to Today
+		if !hasmapto('<Plug>VimdoitJumpToToday')
+			autocmd Filetype qf nmap <buffer><leader>j	<Plug>VimdoitJumpToToday
+			noremap <unique> <script> <Plug>VimdoitJumpToToday		<SID>JumpToToday
+			noremap <SID>JumpToToday		:<c-u>call <SID>JumpToToday()<cr>
 		endif
 
 		let g:vimdoit_did_load_mappings = 1

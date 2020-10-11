@@ -47,7 +47,7 @@ syntax match VimdoitString "\v[ \t]\zs['"].{-}['"]\ze[ \t,.!:\n]" contains=Singl
 highlight link VimdoitString String
 
 " Time & Timespan
-syntax match Appointment "\v\{.*\}"
+syntax match Appointment "\v\{.{-}\}"
 " syntax match Appointment "\v\<\d{2}:\d{2}\>"
 " syntax match Appointment "\v\<\d{2}:\d{2}-\d{2}:\d{2}\>"
 " syntax match Appointment "\v\<\d{4}-\d{2}-\d{2} \d{2}:\d{2}\>"
@@ -88,7 +88,7 @@ syntax match FlagWaiting "\v-waiting\=\d{4}-\d{2}-\d{2}" contained
 highlight link FlagWaiting String
 
 " Flag ID ('0x8c3d19d5')
-syntax match FlagID "\v0x\x{8}" contained conceal
+syntax match FlagID "\v0x\x{8}(\|\d+)?" contained conceal
 highlight link FlagID NerdTreeDir
 
 " Flag ordinary tag ('#SOMESTRING')
@@ -152,6 +152,7 @@ highlight link TaskFailedMarker Error
 
 syntax region TaskFailed start="\v^\t{0}- \[F\]+" skip="\v^\t{1,}" end="^" contains=TaskFailedMarker,FlagID
 syntax region TaskFailed start="\v^\t{1}- \[F\]+" skip="\v^\t{2,}" end="^" contains=TaskFailedMarker,FlagID
+syntax region TaskFailed start="\v^\t{2}- \[F\]+" skip="\v^\t{3,}" end="^" contains=TaskFailedMarker,FlagID
 " TODO other Task failed levels
 
 syntax match TaskCancelledMarker "\v\[-\]" contained
@@ -159,6 +160,10 @@ highlight link TaskCancelledMarker NerdTreeDir
 
 syntax region TaskCancelled start="\v^\t{0}- \[-\]+" skip="\v^\t{1,}" end="^" contains=TaskCancelledMarker,FlagID
 syntax region TaskCancelled start="\v^\t{1}- \[-\]+" skip="\v^\t{2,}" end="^" contains=TaskCancelledMarker,FlagID
+syntax region TaskCancelled start="\v^\t{2}- \[-\]+" skip="\v^\t{3,}" end="^" contains=TaskCancelledMarker,FlagID
+syntax region TaskCancelled start="\v^\t{3}- \[-\]+" skip="\v^\t{4,}" end="^" contains=TaskCancelledMarker,FlagID
+syntax region TaskCancelled start="\v^\t{4}- \[-\]+" skip="\v^\t{5,}" end="^" contains=TaskCancelledMarker,FlagID
+syntax region TaskCancelled start="\v^\t{5}- \[-\]+" skip="\v^\t{6,}" end="^" contains=TaskCancelledMarker,FlagID
 " TODO other Task failed levels
 
 highlight link TaskDone NerdTreeDir
