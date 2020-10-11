@@ -46,11 +46,8 @@ highlight link Code Comment
 syntax match VimdoitString "\v[ \t]\zs['"].{-}['"]\ze[ \t,.!:\n]" contains=SingleSinglequote
 highlight link VimdoitString String
 
-" Time & Timespan
+" Time
 syntax match Appointment "\v\{.{-}\}"
-" syntax match Appointment "\v\<\d{2}:\d{2}\>"
-" syntax match Appointment "\v\<\d{2}:\d{2}-\d{2}:\d{2}\>"
-" syntax match Appointment "\v\<\d{4}-\d{2}-\d{2} \d{2}:\d{2}\>"
 highlight link Appointment Constant
 
 " Inner Headline

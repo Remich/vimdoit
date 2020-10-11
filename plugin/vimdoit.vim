@@ -672,7 +672,7 @@ endfunction
 
 function! s:DataAddFlag(flag, linenum)
 	" is there are delimiter?
-	if s:HasLineFlagDelimiter(a:linenum) == v:false
+	if s:HasLineFlagDelimiter(getline(a:linenum)) == v:false
 		" append delimiter
 		call s:DataAppendFlagDelimiter(a:linenum)
 	endif
@@ -1036,16 +1036,12 @@ function! s:IsLineLink(line)
 	endif
 endfunction
 
-
-function! s:HasLineFlagDelimiter(linenum)
-	let l:line = getline(a:linenum)
-	let l:pattern = '\v\s--\s'
-	let l:result  = match(l:line, l:pattern)
-	
-	if l:result == -1
-		return v:false
-	else
+function! s:HasLineFlagDelimiter(line)
+	echom a:line
+	if a:line =~# '\v\s--(\s|$)'
 		return v:true
+	else
+		return v:false
 	endif
 endfunction
 
