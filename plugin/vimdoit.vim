@@ -33,6 +33,12 @@ for t in s:tools
 	endif
 endfor
 
+" check if we are in the project folder
+let cwd = getcwd()
+if cwd !~# '\v'.g:vimdoit_projectsdir
+	finish
+endif
+
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 "																Global Variables												   "
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -1594,39 +1600,6 @@ function! s:AfterProjectChange()
 	
 endfunction
 
-
-augroup VimDoit
-	autocmd!
-	" disable .swap files, otherwise changing tasks/notes in external files
-	" won't work
-	autocmd BufEnter *.vdo setlocal noswapfile
-	autocmd BufWritePre *.vdo call s:AfterProjectChange()
-	autocmd BufWritePost *.vdo call s:UpdateDateFile()
-	autocmd BufWritePost *.vdo call s:RemoveUnusedDatesDateFile()
-	
-	if !hasmapto('<Plug>VimdoitCheckTask')
-		autocmd Filetype vimdoit nmap <buffer> <leader>X	<Plug>VimdoitCheckTask
-	endif
-	
-	if !hasmapto('<Plug>VimdoitUncheckTask')
-		autocmd Filetype vimdoit nmap <buffer> <leader><Space>	<Plug>VimdoitUncheckTask
-	endif
-	
-augroup END
-
-function! s:CheckTask()
-	let l:line    = getline('.')
-	let l:newline = substitute(l:line, '\v\[ \]', '\[x\]', "")
-	call setline('.', l:newline)
-endfunction
-
-function! s:UncheckTask()
-	let l:line    = getline('.')
-	let l:newline = substitute(l:line, '\v\[x\]', '\[ \]', "")
-	call setline('.', l:newline)
-endfunction
-
-
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 "                        Quickfix Manipulation                          "
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -2571,10 +2544,10 @@ function! s:ModifyTaskPrompt(type)
 				\ 'rm ID',
 				\ ]
 	let selections_dialog = [
-				\ '&done',
-				\ '&todo',
+				\ '&xdone',
+				\ '& todo',
 				\ '&failed',
-				\ '&cancelled',
+				\ '&-cancelled',
 				\ '&block',
 				\ 'r&m waiting',
 				\ 'add &waiting',
@@ -2914,97 +2887,43 @@ endfunction
 "                               Mappings                                "
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
-augroup vimdoit
-	autocmd!
-	
-	if exists("g:vimdoit_did_load_mappings") == v:false
-		
+if exists("g:vimdoit_did_load_mappings") == v:false
 		" Grep projects in cwd
-		if !hasmapto('<Plug>VimdoitGrepProjects')
-			autocmd Filetype vimdoit nmap <buffer><leader>p	<Plug>VimdoitGrepProjects
-			noremap <unique> <script> <Plug>VimdoitGrepProjects		<SID>GrepProjects
-			noremap <SID>GrepProjects		:<c-u>call <SID>GrepProjects(v:false)<cr>
-		endif
-		
+		nnoremap <leader>p	:<c-u>call <SID>GrepProjects(v:false)<cr>
 		" Grep projects in root
-		if !hasmapto('<Plug>VimdoitGrepProjectsAll')
-			autocmd Filetype vimdoit nmap <buffer><leader>P	<Plug>VimdoitGrepProjectsAll
-			noremap <unique> <script> <Plug>VimdoitGrepProjectsAll		<SID>GrepProjectsAll
-			noremap <SID>GrepProjectsAll		:<c-u>call <SID>GrepProjects(v:true)<cr>
-		endif
-		
+		nnoremap <leader>P	:<c-u>call <SID>GrepProjects(v:true)<cr>
 		" Grep tasks in project
-		if !hasmapto('<Plug>VimdoitGrepTasks')
-			autocmd Filetype vimdoit nmap <buffer><leader>t	<Plug>VimdoitGrepTasks
-			noremap <unique> <script> <Plug>VimdoitGrepTasks		<SID>GrepTasks
-			noremap <SID>GrepTasks		:<c-u>call <SID>GrepTasks("project")<cr>
-		endif
-		
+		nnoremap <leader>tt	:<c-u>call <SID>GrepTasks("project")<cr>
 		" Grep tasks in cwd
-		if !hasmapto('<Plug>VimdoitGrepTasksArea')
-			autocmd Filetype vimdoit nmap <buffer><leader>t.	<Plug>VimdoitGrepTasksArea
-			noremap <unique> <script> <Plug>VimdoitGrepTasksArea		<SID>GrepTasksArea
-			noremap <SID>GrepTasksArea		:<c-u>call <SID>GrepTasks("area")<cr>
-		endif
-		
+		nnoremap <leader>t.	:<c-u>call <SID>GrepTasks("area")<cr>
 		" Grep tasks in root
-		if !hasmapto('<Plug>VimdoitGrepTasksAll')
-			autocmd Filetype vimdoit nmap <buffer><leader>T	<Plug>VimdoitGrepTasksAll
-			noremap <unique> <script> <Plug>VimdoitGrepTasksAll		<SID>GrepTasksAll
-			noremap <SID>GrepTasksAll		:<c-u>call <SID>GrepTasks("all")<cr>
-		endif
-		
+		nnoremap <leader>t/	:<c-u>call <SID>GrepTasks("all")<cr>
 		" Sort quickfix list
-		if !hasmapto('<Plug>VimdoitSortQuickfix')
-			autocmd Filetype qf,vimdoit nmap <buffer><leader>s	<Plug>VimdoitSortQuickfix
-			noremap <unique> <script> <Plug>VimdoitSortQuickfix		<SID>SortQuickfix
-			noremap <SID>SortQuickfix		:<c-u>call <SID>SortQuickfix()<cr>
-		endif
-
+		nnoremap <leader>qs	:<c-u>call <SID>SortQuickfix()<cr>
 		" Filter quickfix list
-		if !hasmapto('<Plug>VimdoitFilterQuickfix')
-			autocmd Filetype qf,vimdoit nmap <buffer><leader>f	<Plug>VimdoitFilterQuickfix
-			noremap <unique> <script> <Plug>VimdoitFilterQuickfix		<SID>FilterQuickfix
-			noremap <SID>FilterQuickfix		:<c-u>call <SID>FilterQuickfix()<cr>
-		endif
-
+		nnoremap <leader>qf	:<c-u>call <SID>FilterQuickfix()<cr>
 		" Modify Task Prompt (Normal)
-		if !hasmapto('<Plug>VimdoitModifyTask')
-			autocmd Filetype vimdoit nmap <buffer>M	<Plug>VimdoitModifyTask
-			noremap <unique> <script> <Plug>VimdoitModifyTask		<SID>ModifyTask
-			noremap <SID>ModifyTask		:<c-u>call <SID>ModifyTaskPrompt('char')<cr>
-		endif
-		
+		nnoremap M	:<c-u>call <SID>ModifyTaskPrompt('char')<cr>
 		" Modify Task Prompt (Visual)
-		if !hasmapto('<Plug>VimdoitModifyTaskVisual')
-			autocmd Filetype vimdoit vmap <buffer>M	<Plug>VimdoitModifyTaskVisual
-			noremap <unique> <script> <Plug>VimdoitModifyTaskVisual		<SID>ModifyTaskVisual
-			noremap <SID>ModifyTaskVisual		:<c-u>call <SID>ModifyTaskPrompt(visualmode())<cr>
-		endif
-		
+		vnoremap M	:<c-u>call <SID>ModifyTaskPrompt(visualmode())<cr>
 		" Jump in Quickfix List to Today
-		if !hasmapto('<Plug>VimdoitJumpToToday')
-			autocmd Filetype qf nmap <buffer><leader>j	<Plug>VimdoitJumpToToday
-			noremap <unique> <script> <Plug>VimdoitJumpToToday		<SID>JumpToToday
-			noremap <SID>JumpToToday		:<c-u>call <SID>JumpToToday()<cr>
-		endif
+		nnoremap <leader>qj	:<c-u>call <SID>JumpToToday()<cr>
 
 		let g:vimdoit_did_load_mappings = 1
-
-	endif
-	
-augroup END
-
-if exists("g:vimdoit_loaded_mappings") == v:false
-
-	noremap <silent> <unique> <script> <Plug>VimdoitCheckTask	<SID>CheckTask
-	noremap <SID>CheckTask		:<c-u> call <SID>CheckTask()<CR>
-	
-	noremap <silent> <unique> <script> <Plug>VimdoitUncheckTask	<SID>UncheckTask
-	noremap <SID>UncheckTask		:<c-u> call <SID>UncheckTask()<CR>
-	
-	let g:vimdoit_loaded_mappings = 1
 endif
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+"                             Autocommands                              "
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+augroup VimDoit
+	autocmd!
+	" disable .swap files, otherwise changing tasks/notes in external files won't work
+	autocmd BufEnter *.vdo setlocal noswapfile
+	autocmd BufWritePre *.vdo call s:AfterProjectChange()
+	autocmd BufWritePost *.vdo call s:UpdateDateFile()
+	autocmd BufWritePost *.vdo call s:RemoveUnusedDatesDateFile()
+augroup END
 
 " Restore user's options.
 let &cpo = s:save_cpo
