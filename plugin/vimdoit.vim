@@ -119,7 +119,7 @@ endfunction
 command! -nargs=0 WritePO	:call s:WriteZettelOverviewOfAllProjects()
 
 function! s:WriteZettels()
-	echom s:project_tree
+	echom s:wproject_tree
 	let l:data = json_encode(s:project_tree)		
 	let l:ret = system('node '.g:vimdoit_plugindir.'/src/write-zettels.js -d '.shellescape(l:data))
 	if trim(l:ret) != ""
@@ -701,6 +701,8 @@ endfunction
 
 function! s:NewID()	
 	call s:SetGrep()
+	let cwd_save = getcwd()
+	execute 'cd '.g:vimdoit_projectsdir
 	let l:id = s:GenerateID()
 	" check if ID is already in use
 	silent execute "grep! '0x".l:id."'" 
@@ -711,6 +713,7 @@ function! s:NewID()
 		let l:qf = getqflist()
 	endwhile
 	call s:RestoreGrep()
+	execute 'cd '.cwd_save	
 	return l:id
 endfunction
 
@@ -1756,6 +1759,11 @@ function! s:CmpQfByDate(e1, e2)
 	return t1 ># t2 ? 1 : t1 ==# t2 ? 0 : -1
 endfunction
 
+function! s:CmpQfById(e1, e2)
+	let [t1, t2] = [s:ExtractIdFull(a:e1.text), s:ExtractIdFull(a:e2.text)]
+	return t1 ># t2 ? 1 : t1 ==# t2 ? 0 : -1
+endfunction
+
 function! s:GetDueDate(str)
 	let l:pattern  = '\v\%\zs(\d{4}-\d{2}-\d{2})\ze'
 	let l:date  = []
@@ -1843,6 +1851,7 @@ function! s:GrepProjectsByTag(tag, path)
 	let title = s:ModifyQfTitle(title, 'add', 'sort', 'priority')
 	call setqflist(l:qf, 'r')	
 	let g:vimdoit_quickfix_type = 'project'
+	call s:SetQfSyntax()
 
 	call vimdoit_utility#RestoreOptions()
 endfunction
@@ -1961,19 +1970,24 @@ function! s:NicenQfByDate(qf)
 		let insert = []
 
 		if day_prev !=# day
-			call add(insert, ''.day.':')
+			call add(insert, day.', '.date.':')
+			call add(insert, '')
 		endif
 		
 		if week_prev !=# week
+			call add(insert, '')
 			call add(insert, '--------------------------------------')
-			call add(insert, ' -							Woche '.week.'						  -')
+			call add(insert, '-							Woche '.week.'	 					  -')
 			call add(insert, '--------------------------------------')
+			call add(insert, '')
 		endif
 		
 		if month_prev !=# month
+			call add(insert, '')
 			call add(insert, '======================================')
 			call add(insert, '=						'.month.' '.year.'						=')
 			call add(insert, '======================================')
+			call add(insert, '')
 		endif
 		
 		for i in insert
@@ -1997,7 +2011,11 @@ function! s:GrepTasksByStatus(status, path)
 
 	if a:path ==# '%'
 		let datefile = s:GetDatefileName()
-		let file = '% '.datefile
+		if filereadable(datefile) == v:true
+			let file = '% '.datefile
+		else
+			let file = '%'
+		endif
 	else
 		let file = ''
 		execute "cd ".a:path
@@ -2061,6 +2079,7 @@ function! s:GrepTasksByStatus(status, path)
 	
 	" push list
 	call setqflist(l:qf, 'r')	
+	call s:SetQfSyntax()
 
 	call vimdoit_utility#RestoreOptions()
 	call s:RestoreGrep()
@@ -2166,12 +2185,101 @@ endfunction
 "                               Filtering                               "
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
-function! s:GetID(str)
-	let l:pattern  = '\v0x\x{8}'
-	let l:id  = []
-	call substitute(a:str, l:pattern, '\=add(l:id, submatch(0))', 'g')
-	return l:id[0]
+function! s:SetQfSyntax()
+	
+	if exists('w:quickfix_title') == v:false
+		return
+	endif
+	
+	" :set conceallevel=2 concealcursor=nc
+	syntax match qfFileName "\v^.{-}\|\d+\scol\s\d+\|" conceal
+	syntax match Bars "\v^\|\|" conceal
+
+	syntax match CalendarDateAndTime "\v\w*, \d{4}-\d{2}-\d{2}:"
+	highlight link CalendarDateAndTime Operator
+
+	syntax match CalendarText "\v(\s{3,}\w+\s\d+\s{3,})" contained
+	highlight link CalendarText Operator
+	syntax match CalendarWeek "\v(-{38}|\={38})"
+	syntax match CalendarWeek "\v\s(-|\=)(\s{3,}\w+\s\d+\s{3,})(-|\=)$" contains=CalendarText
+	highlight link CalendarWeek Identifier
+	
+	syntax match SectionHeadlineDelimiter "\v\<" contained conceal
+	syntax match SectionHeadlineDelimiter "\v\>" contained conceal
+	syntax match SectionHeadline "\v\<[^\>]*\>" contains=SectionHeadlineDelimiter
+	highlight link SectionHeadline Operator
+	highlight link SectionHeadlineDelimiter Comment
+	syntax region FlagRegionHeadline start="\v\<[^\>]*\>" end="$" contains=Flag,FlagDelimiter,FlagBlock,FlagWaiting,FlagInProgress,FlagSprint,FlagTag,FlagID,SectionHeadline
+	
+	" Percentages
+	syntax match Percentages "\v\[.*\%\]"
+	highlight link Percentages Comment
+	" Exclamation Mark
+	syntax match ExclamationMark "\v!+"
+	highlight link ExclamationMark Tag
+	" Info
+	syntax match Info "\v\u+[?!]*(\s\u+[?!]*)*:"
+	highlight link Info Todo
+	" Code
+	syntax match Code "\v`.{-}`"
+	highlight link Code Comment
+	" Strings
+	syntax match VimdoitString "\v[ \t]\zs['"].{-}['"]\ze[ \t,.!:\n]" contains=SingleSinglequote
+	highlight link VimdoitString String
+	" Time
+	syntax match Appointment "\v\{.{-}\}"
+	highlight link Appointment Constant
+	" URLs
+	syntax match URL `\v<(((https?|ftp|gopher)://|(mailto|file|news):)[^' 	<>"]+|(www|web|w3)[a-z0-9_-]*\.[a-z0-9._-]+\.[^' 	<>"]+)[a-zA-Z0-9/]`
+	highlight link URL String
+	" Flag Delimiter ('--')
+	syntax match FlagDelimiter "\v\s--\s" contained
+	highlight link FlagDelimiter Comment
+	" Flag Normal ('-flag')
+	syntax match Flag "\v\zs-.*\ze\s" contained
+	highlight link Flag Comment
+	" Flag Sprint ('@sprint')
+	syntax match FlagSprint '\v\@[^ \t]+'
+	syntax match FlagSprint "\v\@today" contained
+	syntax match FlagSprint "\v\@week" contained
+	highlight link FlagSprint Constant
+	" Flag Block ('$23')
+	syntax match FlagBlock "\v\$\d+" contained
+	highlight link FlagBlock Orange
+	" Flag Waiting For Block ('~23')
+	syntax match FlagWaiting "\v\~\d+" contained
+	highlight link FlagWaiting String
+	" Flag ID ('0x8c3d19d5')
+	syntax match FlagID "\v0x\x{8}(\|\d+)?" contained conceal
+	highlight link FlagID NerdTreeDir
+	" Flag ordinary tag ('#SOMESTRING')
+	syntax match FlagTag "\v#[^ \t]*" contained
+	highlight link FlagTag Identifier
+	" Flag Region
+	syntax region FlagRegion start="\v\s--\s" end="$" contains=Flag,FlagDelimiter,FlagBlock,FlagWaiting,FlagInProgress,FlagSprint,FlagTag,FlagID
+	highlight link FlagRegion NerdTreeDir
+	" Task Block
+	syntax match TaskBlock "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*\$\d+" contains=ExclamationMark,Info,Appointment
+	highlight link TaskBlock Orange
+	" Task Waiting
+	syntax match TaskWaiting "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*\~\d+" contains=ExclamationMark,Info,Appointment
+	highlight link TaskWaiting String
+	" Task Done
+	syntax region TaskDone start="\v- \[x\]+" skip="\v^\t{1,}" end="^" contains=FlagID
+	" Task Failed	
+	syntax match TaskFailedMarker "\v\[F\]" contained
+	highlight link TaskFailedMarker Error
+	syntax region TaskFailed start="\v- \[F\]+" skip="\v^\t{1,}" end="^" contains=TaskFailedMarker,FlagID
+	" Task Cancelled
+	syntax match TaskCancelledMarker "\v\[-\]" contained
+	syntax region TaskCancelled start="\v- \[-\]+" skip="\v^\t{1,}" end="^" contains=TaskCancelledMarker,FlagID
+	" ... 
+	highlight link TaskDone NerdTreeDir
+	highlight link TaskFailed NerdTreeDir
+	highlight link TaskCancelled NerdTreeDir
+
 endfunction
+command! -nargs=0 VdoSetQfSyntax	:call s:SetQfSyntax()
 
 function! s:FilterQuickfix()
 
@@ -2208,7 +2316,7 @@ function! s:FilterQuickfix()
 	endfunction
 
 	function! HasSameID(e1, e2)
-		let [t1, t2] = [s:GetID(a:e1.text), s:GetID(a:e2.text)]
+		let [t1, t2] = [s:ExtractIdFull(a:e1.text), s:ExtractIdFull(a:e2.text)]
 		return t1 ==# t2 ? 0 : 1
 	endfunction
 
@@ -2288,7 +2396,7 @@ function! s:FilterQuickfix()
 			return v:true
 		endif
 	endfunction
-	
+
 	" get qf list
 	let l:qf = getqflist()
 	
@@ -2311,7 +2419,6 @@ function! s:FilterQuickfix()
 				\ 'this month*',
 				\ 'upcoming*',
 				\ 'past*',
-				\ 'not in completed/cancelled/archived projects',
 				\ 'add headings',
 				\ ]
 	let selections_dialog = [
@@ -2327,8 +2434,7 @@ function! s:FilterQuickfix()
 				\ 'th&is month*',
 				\ 'u&pcoming*',
 				\ 'p&ast*',
-				\ '&not in completed/cancelled/archived projects',
-				\ 'add headin&gs',
+				\ '&nicen',
 				\ ]
 	let input  = confirm('Filter Quickfix List by', join(selections_dialog, "\n"))
 
@@ -2341,61 +2447,74 @@ function! s:FilterQuickfix()
 	elseif selections[input-1] ==# 'cancelled'
 		call filter(l:qf, function('Cancelled'))
 	elseif selections[input-1] ==# 'unique'
+		call sort(l:qf, function('s:CmpQfById'))
 		call uniq(l:qf, function('HasSameID'))
+		if g:vimdoit_quickfix_type ==# 'appointment'
+			call sort(l:qf, function('s:CmpQfByDate'))
+		else
+			call sort(l:qf)
+		endif
 	elseif selections[input-1] ==# 'today*'
 		if g:vimdoit_quickfix_type ==# 'appointment'
 			call filter(l:qf, function('Today'))
 		else
 			echoe "Quickfix List is not of type appointment."
+			return
 		endif
 	elseif selections[input-1] ==# 'tomorrow*'
 		if g:vimdoit_quickfix_type ==# 'appointment'
 			call filter(l:qf, function('Tomorrow'))
 		else
 			echoe "Quickfix List is not of type appointment."
+			return
 		endif
 	elseif selections[input-1] ==# 'this week*'
 		if g:vimdoit_quickfix_type ==# 'appointment'
 			call filter(l:qf, function('ThisWeek'))
 		else
 			echoe "Quickfix List is not of type appointment."
+			return
 		endif
 	elseif selections[input-1] ==# 'next week*'
 		if g:vimdoit_quickfix_type ==# 'appointment'
 			call filter(l:qf, function('NextWeek'))
 		else
 			echoe "Quickfix List is not of type appointment."
+			return
 		endif
 	elseif selections[input-1] ==# 'this month*'
 		if g:vimdoit_quickfix_type ==# 'appointment'
 			call filter(l:qf, function('ThisMonth'))
 		else
 			echoe "Quickfix List is not of type appointment."
+			return
 		endif
 	elseif selections[input-1] ==# 'upcoming*'
 		if g:vimdoit_quickfix_type ==# 'appointment'
 			call filter(l:qf, function('Upcoming'))
 		else
 			echoe "Quickfix List is not of type appointment."
+			return
 		endif
 	elseif selections[input-1] ==# 'past*'
 		if g:vimdoit_quickfix_type ==# 'appointment'
 			call filter(l:qf, function('Past'))
 		else
 			echoe "Quickfix List is not of type appointment."
+			return
 		endif
-	elseif selections[input-1] ==# 'not in completed/cancelled/archived projects'
-		echoe "Not implemented"
 	elseif selections[input-1] ==# 'add headings'
 		if g:vimdoit_quickfix_type ==# 'appointment'
 			call s:NicenQfByDate(l:qf)
 		else
 			echoe "Quickfix List is not of type appointment."
+			return
 		endif
 	endif
 	
 	" push list
-	call setqflist(l:qf)	
+	call setqflist(l:qf)
+	call s:SetQfSyntax()
 	
 endfunction
 
@@ -2441,6 +2560,8 @@ endfunction
 function! s:GenerateBlockID()
 	call vimdoit_utility#SaveCfStack()
 	call s:SetGrep()
+	let cwd_save = getcwd()
+	execute 'cd '.g:vimdoit_projectsdir
 	
 	function! CmpByNumber(n1, n2)
 		let n1 = a:n1 + 0
@@ -2457,6 +2578,7 @@ function! s:GenerateBlockID()
 		" no existing blocks
 		call vimdoit_utility#RestoreCfStack()
 		call s:RestoreGrep()
+		execute 'cd '.cwd_save
 		return 1
 	endif
 
@@ -2468,6 +2590,7 @@ function! s:GenerateBlockID()
 	
 	call vimdoit_utility#RestoreCfStack()
 	call s:RestoreGrep()
+	execute 'cd '.cwd_save
 	return ids[0]+1
 endfunction
 
@@ -2555,10 +2678,10 @@ function! s:ModifyTaskPrompt(type)
 				\ 'rm ID',
 				\ ]
 	let selections_dialog = [
-				\ '&xdone',
-				\ '& todo',
+				\ '&done',
+				\ '&todo',
 				\ '&failed',
-				\ '&-cancelled',
+				\ '&cancelled',
 				\ '&block',
 				\ 'r&m waiting',
 				\ 'add &waiting',
@@ -2820,6 +2943,19 @@ function! s:SortDateFile()
 	call setpos('.', save_cursor)
 	execute buf.'bdelete!'
 endfunction
+
+function! s:UpdateFirstLineOfDateFile()
+	let save_cursor = getcurpos()
+	let save_file = expand('%')
+	let datefile = s:GetDatefileName()
+	execute 'edit! '.datefile
+	call setline('1', join(s:project_tree['flags']['tag'], " "))
+	execute 'write!'
+	let buf = bufnr()
+	execute 'edit '.save_file
+	call setpos('.', save_cursor)
+	execute buf.'bdelete!'
+endfunction
 	
 function! s:UpdateDateFile()
 	
@@ -2900,6 +3036,7 @@ function! s:UpdateDateFile()
 			" write interpolated dates to datefile
 			call s:WriteToDateFile(dates, item.id)
 			call s:SortDateFile()
+			call s:UpdateFirstLineOfDateFile()
 		endif
 		
 	endfor
@@ -2947,6 +3084,8 @@ augroup VimDoit
 	autocmd BufWritePost *.vdo call s:UpdateDateFile()
 	autocmd BufWritePost *.vdo call s:RemoveUnusedDatesDateFile()
 augroup END
+
+
 
 " Restore user's options.
 let &cpo = s:save_cpo

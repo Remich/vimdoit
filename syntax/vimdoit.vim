@@ -8,10 +8,6 @@ let b:current_syntax = "vimdoit"
 syntax region Vision start="\%2l\zs.*" end="\ze^\==="
 highlight link Vision Comment
 
-" Section Header
-" syntax region SectionHeader start="^\===.*===$" start="^\---.*--$" end="^$" contains=SectionDelimiter,SectionHeadline,FlagRegion
-" highlight link SectionHeader Operator
-
 " Section Delimiter
 syntax match SectionDelimiter "^\===.*===$"
 syntax match SectionDelimiter "^\---.*--$"
@@ -42,7 +38,6 @@ syntax match Code "\v`.{-}`"
 highlight link Code Comment
 
 " Strings
-" syntax match SingleSinglequote "\v[^ \t]\zs'\ze[^ \t]" contained
 syntax match VimdoitString "\v[ \t]\zs['"].{-}['"]\ze[ \t,.!:\n]" contains=SingleSinglequote
 highlight link VimdoitString String
 
@@ -72,16 +67,12 @@ syntax match FlagSprint "\v\@today" contained
 syntax match FlagSprint "\v\@week" contained
 highlight link FlagSprint Constant
 
-" Flag Block ('-block#23')
-" syntax match FlagBlock "\v-block#\d+" contained
+" Flag Block ('$23')
 syntax match FlagBlock "\v\$\d+" contained
 highlight link FlagBlock Orange
 
-" Flag Waiting For Block ('-waiting=block#23')
-" syntax match FlagWaiting "\v-waiting\=block#\d+" contained
+" Flag Waiting For Block ('~23')
 syntax match FlagWaiting "\v\~\d+" contained
-" Flag Waiting For Date ('-waiting=2020-07-08')
-syntax match FlagWaiting "\v-waiting\=\d{4}-\d{2}-\d{2}" contained
 highlight link FlagWaiting String
 
 " Flag ID ('0x8c3d19d5')
