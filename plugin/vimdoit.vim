@@ -695,25 +695,53 @@ function! s:DataAddFlag(flag, linenum)
 	call setline(a:linenum, l:line.' '.a:flag)
 endfunction
 
-function! s:GenerateID()
-	return trim(system('date "+%s%N" | sha256sum')[0:7])
+function! s:GenerateID(len)
+	return trim(system('date "+%s%N" | sha256sum'))[0:a:len-1]
+endfunction
+
+" works like grep, but also considers unsaved changes,
+" whereas grep only works on the files written to disk.
+function! s:GetNumOccurences(pat)
+	" save stuff
+	let l:save_buffer = bufname()
+	let l:save_cursor = getcurpos()
+	let l:save_cwd    = getcwd()
+	let l:save_a      = @a
+	" go to project root
+	execute 'cd '.g:vimdoit_projectsdir
+	" get list of all listed buffers
+	let buffers = getbufinfo({'buflisted':1})	 
+	" open all `.vdo` files, including hidden ones
+	args ./**/*.vdo ./**/.*.vdo
+	" clear register a
+	let @a = ''
+	" check if ID is already in use
+	execute 'silent! bufdo global/'.a:pat.'/yank A'
+	" save  result
+	let l:res = @a
+	" restore register a
+	let @a = l:save_a
+	" restore original buffer
+	execute "buffer ".l:save_buffer
+	" get list of all buffers to delete, except the ones which were previously listed
+	let bdel = s:GetBuffersToDelete(buffers)
+	" delete buffers
+	call s:DeleteBuffers(bdel)
+	" restore cursor
+	call setpos('.', l:save_cursor)
+	" restore working directory
+	execute "cd ".l:save_cwd
+	" return found occurences
+	return len(split(l:res, '\n'))
 endfunction
 
 function! s:NewID()	
-	call s:SetGrep()
-	let cwd_save = getcwd()
-	execute 'cd '.g:vimdoit_projectsdir
-	let l:id = s:GenerateID()
+	" generate ID
+	let l:id = s:GenerateID(8)
 	" check if ID is already in use
-	silent execute "grep! '0x".l:id."'" 
-	let l:qf = getqflist()
-	while len(l:qf) > 0 " yes, generate new ID
-		let l:id = s:GenerateID()
-		silent execute "grep! '0x".l:id."'" 
-		let l:qf = getqflist()
-	endwhile
-	call s:RestoreGrep()
-	execute 'cd '.cwd_save	
+	while s:GetNumOccurences('\v<0x'.l:id.'(\|\d+)?>') > 0
+		let l:id = trim(system('echo '.l:id.' | sha256sum'))[0:7]
+	endwhile 
 	return l:id
 endfunction
 
@@ -1035,15 +1063,8 @@ function! s:ExtractProjectFlags(line)
 	return s:ExtractSectionHeadingFlags(getline(a:line))
 endfunction
 
-function! s:ExtractBlockId(line)
-	let l:pattern  = '\v.*--.*\$(\d+)'
-	let l:block  = []
-	call substitute(a:line, l:pattern, '\=add(l:block, submatch(1))', 'g')
-	return l:block[0]
-endfunction
-
 function! s:ExtractWaitings(line)
-	let l:pattern  = '\v\~(\d+)'
+	let l:pattern  = '\v\~(\x{8})'
 	let l:waitings  = []
 	call substitute(a:line, l:pattern, '\=add(l:waitings, submatch(1))', 'g')
 	return l:waitings
@@ -1217,6 +1238,7 @@ function! s:ExtractLinkLevel(line)
 	return s:ExtractTaskLevel(a:line)	
 endfunction
 
+" TODO refactor using global Extract* and Has* functions
 function! s:ExtractFlagsFromFlagRegion(region)
 
 	let l:line = a:region
@@ -1237,14 +1259,14 @@ function! s:ExtractFlagsFromFlagRegion(region)
 	call substitute(l:line, l:pattern, '\=add(l:flags["sprint"], submatch(0))', 'g')
 	let l:line = substitute(l:line, l:pattern, '', 'g')
 	
-	" extract block flags ('$42')
-	let l:pattern = '\v\$\d+'
+	" extract block flags ('$block')
+	let l:pattern = '\v\$block'
 	let l:normal    = []
 	call substitute(l:line, l:pattern, '\=add(l:flags["block"], submatch(0))', 'g')
 	let l:line = substitute(l:line, l:pattern, '', 'g')
 	
-	" extract waiting for block flags ('~23')
-	let l:pattern = '\v\~\d+'
+	" extract waiting for block flags ('~42a4')
+	let l:pattern = '\v\~\x{8}'
 	let l:normal    = []
 	call substitute(l:line, l:pattern, '\=add(l:flags["waiting_block"], submatch(0))', 'g')
 	let l:line = substitute(l:line, l:pattern, '', 'g')
@@ -2020,10 +2042,10 @@ function! s:GrepTasksByStatus(status, path)
 		let pattern = "[\\#]cur"
 		let title = 'tasks: #cur'
 	elseif a:status ==# 'waiting'
-		let pattern = "~\\d+"
+		let pattern = "~\\x{4}"
 		let title = 'tasks: waiting'
 	elseif a:status ==# 'block'
-		let pattern = "[$]\\d+"
+		let pattern = "[$]\\x{4}"
 		let title = 'tasks: block'
 	elseif a:status ==# 'scheduled'
 		let pattern = "\\{.*\\}"
@@ -2541,54 +2563,16 @@ function! s:ModifyTaskStatus(state, lines)
 	
 endfunction
 
-function! s:GenerateBlockID()
-	call vimdoit_utility#SaveCfStack()
-	call s:SetGrep()
-	let cwd_save = getcwd()
-	execute 'cd '.g:vimdoit_projectsdir
-	
-	function! CmpByNumber(n1, n2)
-		let n1 = a:n1 + 0
-		let n2 = a:n2 + 0
-		return n1 < n2 ? 1 : n1 == n2 ? 0 : -1
-	endfunction
-	
-	let pattern = '.*--.*\\$\\d+'
-	execute 'silent! grep! --type-add '"vimdoit:*.vdo"' -t vimdoit "'.pattern.'" '
-
-	let qf = getqflist()
-
-	if len(qf) == 0
-		" no existing blocks
-		call vimdoit_utility#RestoreCfStack()
-		call s:RestoreGrep()
-		execute 'cd '.cwd_save
-		return 1
-	endif
-
-	let ids = []
-	for i in qf
-		call add(ids, s:ExtractBlockId(i.text))
-	endfor
-	call sort(uniq(sort(ids)), 'CmpByNumber')
-	
-	call vimdoit_utility#RestoreCfStack()
-	call s:RestoreGrep()
-	execute 'cd '.cwd_save
-	return ids[0]+1
-endfunction
-
 function! s:ModifyTaskBlock(lines)
 	for i in a:lines
 		let line = getline(i)
 		" check if line is already a block?
-		if line =~# '\v--.*\zs \$\d+\ze'
+		if line =~# '\v--.*\zs \$block\ze'
 			" yes: remove block
-			execute i.'substitute/\v--.*\zs \$\d+\ze//'
+			execute i.'substitute/\v--.*\zs \$block\ze//'
 		else
 			" no: add block
-			let id = s:GenerateBlockID()
-			call setline(i, line.' $'.id)
+			call setline(i, line.' $block')
 		endif		
 	endfor
 endfunction
@@ -2612,7 +2596,7 @@ function! s:ModifyTaskWaitingRemove(lines)
 
 		if blocks_selection[input-1] ==# 'all'
 			" remove all
-			execute i.'substitute/\v \~\d+//g'
+			execute i.'substitute/\v \~\x{8}//g'
 		else
 			" remove specific
 			execute i.'substitute/\v \~'.blocks[input-2].'//'
@@ -2621,10 +2605,8 @@ function! s:ModifyTaskWaitingRemove(lines)
 endfunction
 
 function! s:ModifyTaskWaitingAdd(lines)
-	let id = input('Enter Block ID: ')	
-	
 	for i in a:lines
-		call setline(i, getline(i).' ~'.id)
+		call setline(i, getline(i).' ~'.@+)
 	endfor
 endfunction
 
@@ -2709,6 +2691,20 @@ function! s:ModifyTaskPrompt(type)
 		echoe "Not implemented"
 	elseif selections[input-1] ==# 'rm ID'
 		call s:ModifyTaskRmID(lines)
+	endif
+endfunction
+
+function! s:YankTaskPrompt()
+	let selections = [
+				\ 'id',
+				\ ]
+	let selections_dialog = [
+				\ '&id',
+				\ ]
+	let input = confirm('Yank Task Properties: ', join(selections_dialog, "\n"))
+	if selections[input-1] ==# 'id'
+		let @+ = s:ExtractIdFull(getline('.'))
+		silent echom "ID yanked to \" register."
 	endif
 endfunction
 
@@ -3055,6 +3051,8 @@ if exists("g:vimdoit_did_load_mappings") == v:false
 		vnoremap M	:<c-u>call <SID>ModifyTaskPrompt(visualmode())<cr>
 		" Jump in Quickfix List to Today
 		nnoremap <leader>qj	:<c-u>call <SID>JumpToToday()<cr>
+		" Yank Task Prompt (Normal)
+		nnoremap Y	:<c-u>call <SID>YankTaskPrompt()<cr>
 
 		let g:vimdoit_did_load_mappings = 1
 endif

@@ -67,12 +67,12 @@ syntax match FlagSprint "\v\@today" contained
 syntax match FlagSprint "\v\@week" contained
 highlight link FlagSprint Constant
 
-" Flag Block ('$23')
-syntax match FlagBlock "\v\$\d+" contained
+" Flag Block ('#block')
+syntax match FlagBlock "\v\$<block>" contained
 highlight link FlagBlock Orange
 
-" Flag Waiting For Block ('~23')
-syntax match FlagWaiting "\v\~\d+" contained
+" Flag Waiting For Block ('~a42a')
+syntax match FlagWaiting "\v\~\x{8}" contained
 highlight link FlagWaiting String
 
 " Flag ID ('0x8c3d19d5')
@@ -95,11 +95,11 @@ highlight link FlagRegion NerdTreeDir
 
 
 " Task Block
-syntax match TaskBlock "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*\$\d+" contains=ExclamationMark,Info,Appointment
+syntax match TaskBlock "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*\$block" contains=ExclamationMark,Info,Appointment
 highlight link TaskBlock Orange
 
 " Task Waiting
-syntax match TaskWaiting "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*\~\d+" contains=ExclamationMark,Info,Appointment
+syntax match TaskWaiting "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*\~\x{8}" contains=ExclamationMark,Info,Appointment
 highlight link TaskWaiting String
 
 " syntax match TaskScheduledWeek "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*-week" contains=ExclamationMark,Info
