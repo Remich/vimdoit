@@ -871,11 +871,11 @@ function! s:DataUpdateReferences()
 		" get line without indendation
 		let l:replace = substitute(i, '\v^\s*', '', 'g')
 		" escaping of special characters
-		let l:replace = escape(l:replace, '~&$.*()|\{}[]<>')
+		let l:replace_esc = escape(l:replace, '~&$.*()|\{}[]<>')
 		" line does not have an ID, so skip
 		if l:id == -1 | continue | endif
 		" actual updating of references
-		execute 'silent! bufdo global/\v\s0x'.l:id.'(\s|$)/substitute/\v^\s*\zs.*\ze$/'.l:replace.'/g'
+		execute 'silent! bufdo global/\v\s0x'.l:id.'(\s|$)/substitute/\v^\s*\zs.*\ze$/'.l:replace_esc.'/g'
 		" execute 'silent! bufdo global/\v\s0x'.l:id.'(\s|$)/substitute/\V^\s\*\zs\.\*\ze$/'.l:replace.'/g'
 		" check if line has a repetition, then update its auto-generated references
 		if s:HasRepetition(i) == v:false
@@ -891,7 +891,7 @@ function! s:DataUpdateReferences()
 		if len(l:split_2) == 1
 			call add(l:split_2, '')
 		endif
-		let l:final = [ l:split[0], l:split_2[0], l:split_2[1] ]
+		let l:final = map([ l:split[0], l:split_2[0], l:split_2[1] ],  'escape(v:val, "~&$.*()|\{}[]<>")')
 		" keep the auto-generated status,date and id by using a backreference in the substitution:
 		execute 'silent! bufdo global/\v\s0x'.l:id.'\|\d+(\s|$)/substitute/\v^\s*-\s(\[.\])?\zs.*(\{.*\}).*(0x\x{8}\|\d+)(\s.*$|$)/'.l:final[0].'\2'.l:final[1].'\3'.l:final[2].'/g'
 	endfor
@@ -1193,10 +1193,7 @@ function! s:ExtractIdFull(line)
 endfunction
 
 function! s:ExtractTaskName(line)
-	let l:pattern = '\v\s*-\s\[.*\]\s\zs.*\ze((--)|$)'
-	let l:task    = []
-	call substitute(a:line, l:pattern, '\=add(l:task, submatch(0))', 'g')
-	return trim(l:task[0])
+	return substitute(a:line, '\v^\s*- \[.\]\s', '', '')
 endfunction
 
 function! s:ExtractNoteName(line)
@@ -2769,6 +2766,7 @@ function! s:WriteToDateFile(dates, id)
 
 	" 2.1 check which dates to delete
 	for i in qf
+		" let str = escape(i.text, '~&$.*()|\{}[]<>')
 		let d = s:ExtractDate(i.text)
 		if s:IsInList(d, a:dates) == v:false
 			call add(to_delete, s:ExtractIdFull(getline(i.lnum)))
@@ -2962,7 +2960,7 @@ function! s:UpdateDateFile()
 		if item.valid_syntax == v:false
 			continue
 		endif
-	
+
 		" check if task has a repetition
 		if s:HasRepetition(item.name) == v:true
 			let dates = []
