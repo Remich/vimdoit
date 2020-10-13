@@ -772,7 +772,8 @@ function! s:DataFindChanges()
 		return []
 	endif
 	
-	return split(l:split[0], ';')
+	let l:lines = split(l:split[0], ';')
+	call map(l:lines, 'getline(v:val)')
 	return l:lines
 endfunction
 
@@ -788,119 +789,94 @@ function! s:DataGetIDOfLine(line)
 	endif
 endfunction
 
-function! s:DataUpdateReferences()
+function! s:GetBuffersToDelete(buffers)
 
+	let buflist   = getbufinfo({'buflisted':1})
+	let to_delete = []
+
+	for i in buflist
+		let found = v:false
+		for j in a:buffers
+			if i['name'] ==# j['name']
+				let found = v:true
+			endif
+		endfor
+
+		if found == v:false
+			call add(to_delete, i)
+		endif
+	endfor
+				
+	return to_delete	
+	
+endfunction
+
+function! s:DeleteBuffers(buffers)
+	for buf in a:buffers
+		execute 'silent bdelete '.buf.bufnr
+	endfor
+endfunction
+
+function! s:DataUpdateReferences()
 	"save cursor
 	let l:save_buffer = bufname()
 	let l:save_cursor = getcurpos()
 	let l:save_cwd    = getcwd()
-	call vimdoit_utility#SaveCfStack()
-
-	" save grep command of user
-	call s:SetGrep()
-
+	" go to projects root
 	execute "cd ".g:vimdoit_projectsdir
-
+	" make sure that all tasks/notes have an ID
 	call s:DataCheckIDs()
+	" get the changed lines
 	let l:changedlines = s:DataFindChanges()
-	
-	"write
-	execute "write!"
+	" no changes, abort
+	if len(l:changedlines) == 0 | return | endif
+	" get list of all listed buffers
+	let buffers = getbufinfo({'buflisted':1})	 
+	" open all files
+	args ./**/*.vdo
+	args ./**/.*.vdo
 
+	" update references of changed lines, if there are any
 	for i in l:changedlines
-		let l:line = getline(i)
-		
 		" get ID of line
-		let l:id = s:DataGetIDOfLine(l:line)
-		
+		let l:id = substitute(s:DataGetIDOfLine(i), '\v\|', '\\\|', '')
+		" get line without indendation
+		let l:replace = substitute(i, '\v^\s*', '', 'g')
 		" line does not have an ID, so skip
-		if l:id == -1
-			continue
-		endif
-		
-		" grep for id
-		let l:id_grep = substitute(l:id, '\v\|', '\\\\|', '')
-		silent execute 'grep! --hidden --type-add '"vimdoit:*.vdo"' -t vimdoit "\s0x'.l:id_grep.'(\s\|$)"' 
-		let l:qf = getqflist()
-
-		" no external references: continue
-		if len(l:qf) == 0
-			continue
-		endif
-
-		" change lines
-		for entry in l:qf
-			execute 'buffer '.entry['bufnr']
-
-			" make sure that the indendation is correct
-			let l:level = s:ExtractTaskLevel(getline(entry['lnum']))
-			let l:padding = ""
-			for k in range(l:level)
-				let l:padding .= "	"
-			endfor
-			
-			call setline(entry['lnum'], l:padding."".trim(l:line))
-			
-			execute 'update'
-		endfor
-		
-		execute 'update'
-
+		if l:id == -1 | continue | endif
+		" actual updating of references
+		execute 'silent! bufdo global/\v\s0x'.l:id.'(\s|$)/substitute/\v^\s*\zs.*\ze$/'.l:replace.'/g'
 		" check if line has a repetition, then update its auto-generated references
-		if s:HasRepetition(l:line) == v:true
-			silent execute 'grep! --hidden --type-add '"vimdoit:*.vdo"' -t vimdoit "\s0x'.l:id_grep.'\\|\d+"' 
-			let l:qf = getqflist()
-			
-			" no external references: continue
-			if len(l:qf) == 0
-				continue
-			endif
-
-			" change lines
-			for entry in l:qf
-				execute 'buffer '.entry['bufnr']
-				let el = getline(entry['lnum'])
-				
-				" make sure that the indendation is correct
-				let l:level = s:ExtractTaskLevel(el)
-				let l:padding = ""
-				for k in range(l:level)
-					let l:padding .= "	"
-				endfor
-				
-				" extract date from el 
-				let el_date = s:ExtractDateFull(el)
-				" extract id from el
-				let el_id = s:ExtractIdFull(el)
-
-				let newline = substitute(l:line, '\v\{.*\}', el_date, 'g')
-				let newline = substitute(newline, '\v0x\zs\x{8}\ze', el_id, 'g')
-				call setline(entry['lnum'], l:padding."".trim(newline))
-				
-				execute 'update'
-			endfor
-			
-			execute 'update'
+		if s:HasRepetition(i) == v:false
+			continue
 		endif
-		
+		" split replacement into three parts:
+		"		a) everything after status and before the repetition
+		"		b) everything after the repetition and before the id
+		"		c) everything after the id
+		let l:replace = substitute(l:replace, '\v^\s*-\s(\[.\])?', '', '')
+		let l:split   = split(l:replace, '\v\{.*\}')
+		let l:split_2 = split(l:split[1], '\v0x\x{8}')
+		if len(l:split_2) == 1
+			call add(l:split_2, '')
+		endif
+		let l:final = [ l:split[0], l:split_2[0], l:split_2[1] ]
+		" keep the auto-generated status,date and id by using a backreference in the substitution:
+		execute 'silent! bufdo global/\v\s0x'.l:id.'\|\d+(\s|$)/substitute/\v^\s*-\s(\[.\])?\zs.*(\{.*\}).*(0x\x{8}\|\d+)(\s.*$|$)/'.l:final[0].'\2'.l:final[1].'\3'.l:final[2].'/g'
 	endfor
 
-	execute "update!"
-	
-	" restore grep command of user
-	call s:RestoreGrep()
-
-	" restore buffer
+	" save changed buffers
+	execute 'silent! bufdo update'
+	" restore original buffer
 	execute "buffer ".l:save_buffer
-	
+	" get list of all buffers to delete, except the ones which were previously listed
+	let bdel = s:GetBuffersToDelete(buffers)
+	" delete buffers
+	call s:DeleteBuffers(bdel)
 	" restore cursor
 	call setpos('.', l:save_cursor)
-
-	" restore wd
+	" restore working directory
 	execute "cd ".l:save_cwd
-
-	" restore cf stack
-	call vimdoit_utility#RestoreCfStack()
 endfunction
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -1044,7 +1020,6 @@ function! s:IsLineLink(line)
 endfunction
 
 function! s:HasLineFlagDelimiter(line)
-	echom a:line
 	if a:line =~# '\v\s--(\s|$)'
 		return v:true
 	else
@@ -2419,7 +2394,8 @@ function! s:FilterQuickfix()
 				\ 'this month*',
 				\ 'upcoming*',
 				\ 'past*',
-				\ 'add headings',
+				\ 'nicen',
+				\ 'syntax',
 				\ ]
 	let selections_dialog = [
 				\ '&todo',
@@ -2435,6 +2411,7 @@ function! s:FilterQuickfix()
 				\ 'u&pcoming*',
 				\ 'p&ast*',
 				\ '&nicen',
+				\ 'synta&x',
 				\ ]
 	let input  = confirm('Filter Quickfix List by', join(selections_dialog, "\n"))
 
@@ -2503,9 +2480,16 @@ function! s:FilterQuickfix()
 			echoe "Quickfix List is not of type appointment."
 			return
 		endif
-	elseif selections[input-1] ==# 'add headings'
+	elseif selections[input-1] ==# 'nicen'
 		if g:vimdoit_quickfix_type ==# 'appointment'
 			call s:NicenQfByDate(l:qf)
+		else
+			echoe "Quickfix List is not of type appointment."
+			return
+		endif
+	elseif selections[input-1] ==# 'syntax'
+		if g:vimdoit_quickfix_type ==# 'appointment'
+			call s:SetQfSyntax()
 		else
 			echoe "Quickfix List is not of type appointment."
 			return
@@ -2945,6 +2929,9 @@ function! s:SortDateFile()
 endfunction
 
 function! s:UpdateFirstLineOfDateFile()
+	if has_key(s:project_tree['flags'], 'tag') == v:false
+		return
+	endif
 	let save_cursor = getcurpos()
 	let save_file = expand('%')
 	let datefile = s:GetDatefileName()
