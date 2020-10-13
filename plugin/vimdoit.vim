@@ -870,10 +870,13 @@ function! s:DataUpdateReferences()
 		let l:id = substitute(s:DataGetIDOfLine(i), '\v\|', '\\\|', '')
 		" get line without indendation
 		let l:replace = substitute(i, '\v^\s*', '', 'g')
+		" escaping of special characters
+		let l:replace = escape(l:replace, '~&$.*()|\{}[]<>')
 		" line does not have an ID, so skip
 		if l:id == -1 | continue | endif
 		" actual updating of references
 		execute 'silent! bufdo global/\v\s0x'.l:id.'(\s|$)/substitute/\v^\s*\zs.*\ze$/'.l:replace.'/g'
+		" execute 'silent! bufdo global/\v\s0x'.l:id.'(\s|$)/substitute/\V^\s\*\zs\.\*\ze$/'.l:replace.'/g'
 		" check if line has a repetition, then update its auto-generated references
 		if s:HasRepetition(i) == v:false
 			continue
