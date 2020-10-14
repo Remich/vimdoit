@@ -19,7 +19,7 @@ syntax match SectionHeadlineDelimiter "\v\>" contained conceal
 syntax match SectionHeadline "\v^\t*\zs\<[^\>]*\>\ze" contains=SectionHeadlineDelimiter
 highlight link SectionHeadline Operator
 highlight link SectionHeadlineDelimiter Comment
-syntax region FlagRegionHeadline start="\v^\t*\<[^\>]*\>" end="$" contains=Flag,FlagDelimiter,FlagBlock,FlagWaiting,FlagInProgress,FlagSprint,FlagTag,FlagID,SectionHeadline
+syntax region FlagRegionHeadline start="\v^\t*\<[^\>]*\>" end="$" contains=Flag,FlagDelimiter,FlagBlock,FlagWaiting,FlagSprint,FlagTag,FlagID,SectionHeadline
 
 " Percentages
 syntax match Percentages "\v\[.*\%\]"
@@ -84,7 +84,7 @@ syntax match FlagTag "\v#[^ \t]*" contained
 highlight link FlagTag Identifier
 
 " Flag Region
-syntax region FlagRegion start="\v\s--\s" end="$" contains=Flag,FlagDelimiter,FlagBlock,FlagWaiting,FlagInProgress,FlagSprint,FlagTag,FlagID
+syntax region FlagRegion start="\v\s--\s" end="$" contains=Flag,FlagDelimiter,FlagBlock,FlagWaiting,FlagSprint,FlagTag,FlagID
 highlight link FlagRegion NerdTreeDir
 
 " Task (not used)
@@ -95,11 +95,11 @@ highlight link FlagRegion NerdTreeDir
 
 
 " Task Block
-syntax match TaskBlock "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*\$block" contains=ExclamationMark,Info,Appointment
+syntax match TaskBlock "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*\$block" contains=ExclamationMark,Info,Appointment,Code,Percentages
 highlight link TaskBlock Orange
 
 " Task Waiting
-syntax match TaskWaiting "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*\~\x{8}" contains=ExclamationMark,Info,Appointment
+syntax match TaskWaiting "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*\~\x{8}" contains=ExclamationMark,Info,Appointment,Code,Percentages
 highlight link TaskWaiting String
 
 " syntax match TaskScheduledWeek "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*-week" contains=ExclamationMark,Info

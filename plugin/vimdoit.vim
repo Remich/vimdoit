@@ -225,7 +225,7 @@ function! s:DataPrintTask(task, level)
 	let l:padding   = s:DataGetPadding(a:level + a:task['level'])
 	let l:nextlevel = a:level
 	
-	echom l:padding."".a:task['name']." – ".a:task['level']
+	echom l:padding."".a:task['text']." – ".a:task['level']
 	
 	if len(a:task['tasks']) > 0
 		call map(a:task['tasks'], 's:DataPrintTask(v:val, l:nextlevel)')	
@@ -309,52 +309,46 @@ function! s:DataNewSection(name)
 	return s:section	
 endfunction
 
-function! s:DataNewTask(name, linenum, level)
+" this function is only for documentation purposes
+function! s:DataNewTask()
+	" a task has the following attributes and default values:
 	let s:task = {	
-				\ 'id'	  		: -1,
-				\ 'type'		 : 'task',
-				\ 'name'	 	 : a:name,
-				\ 'linenum'	 : a:linenum,
-				\ 'level'		 : a:level,
-				\ 'done'		 : 0,
-				\ 'waiting'	 : 0,
-				\ 'failed'	 : 0,
-				\ 'blocking' : 0,
-				\ 'tasks'		 : [],
-				\ 'flags'		 : {},
-				\ 'valid_syntax' : v:true,
-				\ }
+		\ 'type'				: 'task',
+		\ 'linenum'			: -1,
+		\ 'line'				: '',
+		\ 'id'					: -1,
+		\ 'level'				: 0,
+		\ 'status'			: 'todo',
+		\ 'text'				: 'BE: like water',
+		\ 'date'				: -1,
+		\ 'repetition'	: -1,
+		\ 'priority'		: 0,
+		\ 'tags'				: [],
+		\ 'waiting'			: [],
+		\ 'blocking'		: v:false,
+		\ 'tasks'				: [],
+	\ }
 	return s:task
 endfunction
 
-" Notes are speciel types of tasks.
-function! s:DataNewNote(name, linenum, level)
+" this function is only for documentation purposes
+function! s:DataNewNote()
 	let s:note = {	
-				\ 'id'	   	: -1,
-				\ 'type'		 : 'note',
-				\ 'name'	 	 : a:name,
-				\ 'linenum'	 : a:linenum,
-				\ 'level'		 : a:level,
-				\ 'done'		 : -1,
-				\ 'tasks'	 	 : [],
-				\ 'flags'		 : {},
-				\ 'valid_syntax' : v:true,
-				\ }
+		\ 'type'				: 'note',
+		\ 'linenum'			: -1,
+		\ 'line'				: '',
+		\ 'id'					: -1,
+		\ 'level'				: 0,
+		\ 'text'				: 'BE: like water',
+		\ 'date'				: -1,
+		\ 'repetition'	: -1,
+		\ 'priority'		: 0,
+		\ 'tags'				: [],
+		\ 'waiting'			: [],
+		\ 'blocking'		: v:false,
+		\ 'tasks'				: [],
+	\ }
 	return s:note
-endfunction
-
-" Links are speciel types of tasks.
-function! s:DataNewLink(project, section, linenum, level)
-	let s:link = {	
-				\ 'id'	  	: -1,
-				\ 'type'		 : 'link',
-				\ 'project'	 : a:project,
-				\ 'section'	 : a:section,
-				\ 'linenum'	 : a:linenum,
-				\ 'level'		 : a:level,
-				\ 'flags'		 : {},
-				\ }
-	return s:link
 endfunction
 
 function! s:GetProjectType(flags)
@@ -432,119 +426,37 @@ function! s:DataUpdateEndOfEachSection(section)
 	return l:prev_section
 endfunction
 
-function! s:IsSubTask(t1, t2)
-	if a:t1["level"] > a:t2["level"]
-		return v:true
-	else
-		return v:false
-	endif
-endfunction
-
-function! s:IsTaskWaiting(flags)
-	if has_key(a:flags, "waiting_block") == 1
-		if len(a:flags['waiting_block']) > 0
-			return v:true
-		else
-			return v:false
-		endif
-	else
-		return v:false
-	endif
-endfunction
-
-function! s:IsTaskBlocking(flags)
-	if has_key(a:flags, "block") == 1
-		if len(a:flags['block']) > 0
-			return v:true
-		else
-			return v:false
-		endif
-	else
-		return v:false
-	endif
-endfunction
-
-function! s:DataAddTask(name, linenum, level, flags, valid_syntax)
+function! s:DataAddTask(task)
+	" DEPRECATED: those attributes are only for compatibility purposes kept
 	
-	let l:new = s:DataNewTask(a:name, a:linenum, a:level)	
-	let l:new['flags']        = a:flags
-	let l:new['done']         = s:IsTaskDone(a:linenum)
-	let l:new['waiting']      = s:IsTaskWaiting(a:flags)
-	let l:new['blocking']     = s:IsTaskBlocking(a:flags)
-	let l:new['failed']       = s:IsTaskFailed(a:linenum)
-	let l:new['valid_syntax'] = a:valid_syntax
-	
-	" set id as supplied in flag
-	if has_key(a:flags, 'id') == v:true && len(a:flags['id']) != 0
-		let l:new['id'] = a:flags['id']
-	endif
-
 	" update tasks stack according to level	
-	call s:DataStackUpdate(s:tasks_stack, l:new["level"])
-	
+	call s:DataStackUpdate(s:tasks_stack, a:task["level"])
 	" decide where to add task to (current section or current tasks)
 	if len(s:tasks_stack) == 0
 		let l:top = s:DataStackTop(s:sections_stack)
 	else
 		let l:top = s:DataStackTop(s:tasks_stack)
 	endif
-	
-	call add(l:top['tasks'], l:new)
-
+	" adding
+	call add(l:top['tasks'], a:task)
 	" add task as top of `s:task_stack`
-	call s:DataStackPush(s:tasks_stack, l:new)
-
-	return l:new
+	call s:DataStackPush(s:tasks_stack, a:task)
 endfunction
 
-function! s:DataAddNote(name, linenum, level, flags, valid_syntax)
-	
-	let l:new = s:DataNewNote(a:name, a:linenum, a:level)	
-	let l:new['flags']        = a:flags
-	let l:new['valid_syntax'] = a:valid_syntax
-	
-	" set id as supplied in flag
-	if has_key(a:flags, 'id') == v:true && len(a:flags['id']) != 0
-		let l:new['id'] = a:flags['id']
-	endif
-
+function! s:DataAddNote(note)
 	" update tasks stack according to level	
-	call s:DataStackUpdate(s:tasks_stack, l:new["level"])
-	
+	call s:DataStackUpdate(s:tasks_stack, a:note["level"])
 	" decide where to add note to (current section or current tasks)
 	if len(s:tasks_stack) == 0
 		let l:top = s:DataStackTop(s:sections_stack)
 	else
 		let l:top = s:DataStackTop(s:tasks_stack)
 	endif
-	
-	call add(l:top['tasks'], l:new)
-
+	" adding
+	call add(l:top['tasks'], a:note)
 	" add link as top of `s:task_stack`
-	call s:DataStackPush(s:tasks_stack, l:new)
+	call s:DataStackPush(s:tasks_stack, a:note)
 endfunction
-
-function! s:DataAddLink(project, section, linenum, level, flags)
-	
-	let l:new = s:DataNewLink(a:project, a:section, a:linenum, a:level)	
-	let l:new['flags'] = a:flags
-	
-	" update tasks stack according to level	
-	call s:DataStackUpdate(s:tasks_stack, l:new["level"])
-	
-	" decide where to add link to (current section or current tasks)
-	if len(s:tasks_stack) == 0
-		let l:top = s:DataStackTop(s:sections_stack)
-	else
-		let l:top = s:DataStackTop(s:tasks_stack)
-	endif
-	
-	call add(l:top['tasks'], l:new)
-
-	" add link as top of `s:task_stack`
-	call s:DataStackPush(s:tasks_stack, l:new)
-endfunction
-
 
 " =========================================
 " = Methods for computing additional data =
@@ -589,19 +501,14 @@ endfunction
 
 function! s:GetInfoAllSubtasks(task, info, parent)
 
-	" skip links
-	if a:task['type'] ==# 'link'
-		return
-	endif
-
 	"skip notes
 	if a:task['type'] ==# 'task'
 		let a:info['num']	+= 1
 		
 		if a:parent == v:false
 			" parent task is not done, check if current task is done
-			let a:info['done'] += a:task['done'] == v:true ? 1 : 0
-			let l:parent = a:task['done']
+			let a:info['done'] += s:IsTaskDone(a:task) == v:true ? 1 : 0
+			let l:parent = s:IsTaskDone(a:task) 
 		else
 			" parent task is done, therefore this task is also done
 			let a:info['done'] += 1
@@ -614,35 +521,6 @@ function! s:GetInfoAllSubtasks(task, info, parent)
 	for i in a:task['tasks']
 		call s:GetInfoAllSubtasks(i, a:info, l:parent)
 	endfor
-endfunction
-
-function! s:HasItemFlagSprint(item)
-	if has_key(a:item['flags'], 'sprint') != 0 && len(a:item['flags']['sprint']) > 0
-		return v:true
-	else
-		return v:false
-	endif
-endfunction
-
-" return a flat list of all tasks filtered by `a:condition`
-function! s:FilterTasks(item, list)
-
-	if s:HasItemFlagSprint(a:item) == v:true
-		call add(a:list['items'], a:item)
-	endif
-
-	for i in a:item['tasks']
-		call s:FilterTasks(i, a:list)
-	endfor
-	
-	if has_key(a:item, 'sections') == 0
-		return
-	endif
-	
-	for i in a:item['sections']
-		call s:FilterTasks(i, a:list)
-	endfor
-
 endfunction
 
 function! s:DataGetAllTasksAndNotes(item, list)
@@ -976,8 +854,10 @@ function! s:DrawSectionOverview()
 endfunction
 
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-"												 		Project-file Parser			                       "
+"																		PARSING					                       "
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+function! s:NavParsingStart()
+endfunction
 
 function! s:IsLineEmpty(line)
 	if trim(a:line) == ""
@@ -1066,13 +946,6 @@ function! s:ExtractProjectFlags(line)
 	return s:ExtractSectionHeadingFlags(getline(a:line))
 endfunction
 
-function! s:ExtractWaitings(line)
-	let l:pattern  = '\v\~(\x{8})'
-	let l:waitings  = []
-	call substitute(a:line, l:pattern, '\=add(l:waitings, submatch(1))', 'g')
-	return l:waitings
-endfunction
-
 function! s:ExtractSectionHeading(line)
 	let l:pattern  = '\v^\t*\<\zs.*\ze\>'
 	let l:heading  = []
@@ -1138,13 +1011,6 @@ function! s:ExtractRepetitionOperand(line)
 	return trim(l:operand[0])
 endfunction
 
-function! s:ExtractDate(line)
-	let l:pattern = '\v\{.*\zs\d{4}-\d{2}-\d{2}\ze.*\}'
-	let l:date    = []
-	call substitute(a:line, l:pattern, '\=add(l:date, submatch(0))', 'g')
-	return trim(l:date[0])
-endfunction
-
 function! s:ExtractDateExact(line)
 	let l:pattern = '\v\{\zs\d{4}-\d{2}-\d{2}\ze\}'
 	let l:date    = []
@@ -1164,32 +1030,11 @@ function! s:ExtractDateFull(line)
 	return trim(l:datefull[0])
 endfunction
 
-function! s:ExtractDateFuller(line)
-	let l:pattern = '\v\zs\{.*\}\ze'
-	let l:datefull    = []
-	call substitute(a:line, l:pattern, '\=add(l:datefull, submatch(0))', 'g')
-	return trim(l:datefull[0])
-endfunction
-
 function! s:ExtractDateId(line)
 	let l:pattern = '\v0x\x{8}\|\zs\d+\ze'
 	let l:dateid    = []
 	call substitute(a:line, l:pattern, '\=add(l:dateid, submatch(0))', 'g')
 	return trim(l:dateid[0])
-endfunction
-
-function! s:ExtractId(line)
-	let l:pattern = '\v0x\zs\x{8}\ze'
-	let l:id    = []
-	call substitute(a:line, l:pattern, '\=add(l:id, submatch(0))', 'g')
-	return trim(l:id[0])
-endfunction
-
-function! s:ExtractIdFull(line)
-	let l:pattern = '\v0x\zs\x{8}(\|\d+)?\ze'
-	let l:id    = []
-	call substitute(a:line, l:pattern, '\=add(l:id, submatch(0))', 'g')
-	return trim(l:id[0])
 endfunction
 
 function! s:ExtractTaskName(line)
@@ -1220,22 +1065,6 @@ function! s:ExtractLinkSection(line)
 	else
 		return trim(l:link[0])
 	endif
-endfunction
-
-
-function! s:ExtractTaskLevel(line)
-	let l:pattern = '\v\zs\s*\ze-'
-	let l:tabs    = []
-	call substitute(a:line, l:pattern, '\=add(l:tabs, submatch(0))', 'g')
-	return strlen(l:tabs[0])
-endfunction
-
-function! s:ExtractNoteLevel(line)
-	return s:ExtractTaskLevel(a:line)	
-endfunction
-
-function! s:ExtractLinkLevel(line)
-	return s:ExtractTaskLevel(a:line)	
 endfunction
 
 " TODO refactor using global Extract* and Has* functions
@@ -1317,158 +1146,249 @@ function! s:ExtractSectionHeadingFlags(line)
 	return s:ExtractFlagsFromFlagRegion(l:line)
 endfunction
 
-function! s:ExtractTaskFlags(line)
+function! s:IsTaskDone(task)
+	return a:task['status'] ==# 'done' ? v:true : v:false
+endfunction
 
-	" does the task have any flags?
-	if s:HasTaskFlags(a:line) == v:false
-		return {}
+let s:pat_indendation = '\s*'
+let s:pat_note = s:pat_indendation.'-\s*'
+let s:pat_task = s:pat_indendation.'- \[.\]\s*'
+let s:pat_notetask = s:pat_note.'(\[.\])?\s*'
+let s:pat_notetaskexc = s:pat_notetask.'(!*\s*)?'
+let s:pat_id = '\x{8}(\|\d+)?'
+let s:pat_weekday = '(Mon|Tue|Wed|Thu|Fri|Sat|Sun): '
+let s:pat_date = '\d{4}-\d{2}-\d{2}'
+let s:pat_time = ' \d{2}:\d{2}'
+let s:pat_datetime = s:pat_date.'('.s:pat_time.')?'
+let s:pat_repetition = '\|(y|mo|w|d):\d+'
+let s:pat_flags = '\s--\s'
+
+let s:patterns = {
+	\ 'id': '\v<0x\zs'.s:pat_id.'\ze(\s|$)',
+	\ 'level': '\v^\zs'.s:pat_indendation.'\ze[^\t]',
+	\ 'status': '\v^'.s:pat_indendation.'- \[\zs.\ze\]',
+	\ 'date': '\v^'.s:pat_notetaskexc.'\{\zs('.s:pat_weekday.')?'.s:pat_datetime.'\ze\}',
+	\ 'repetition': '\v^'.s:pat_notetaskexc.'\{\zs'.s:pat_datetime.s:pat_repetition.'(\|'.s:pat_datetime.')?\ze\}',
+	\ 'priority': '\v!',
+	\ 'flags': '\v'.s:pat_flags.'\zs.*\ze$',
+	\ 'tags': '\v#\zs.{-}\ze(\s|$)',
+	\ 'waiting': '\v\~\zs'.s:pat_id.'\ze(\s|$)',
+	\ 'blocking': '\v\$\zsblock\ze(\s|$)',
+	\ }
+
+function! s:ExtractPatternFromLine(line, pat)
+	let l:extract = []
+	call substitute(a:line, a:pat, '\=add(l:extract, submatch(0))', 'g')
+	return l:extract
+endfunction
+
+function! s:ExtractId(line)
+	let flags = s:ExtractFlags(a:line)
+	if len(flags) == 0
+		return -1
+	else
+		let l:id = s:ExtractPatternFromLine(flags[0], s:patterns['id'])
+		return len(l:id) == 0 ? -1 : l:id[0]
 	endif
+endfunction
+
+function! s:ExtractLevel(line)
+	let l:level = s:ExtractPatternFromLine(a:line, s:patterns['level'])
+	return strlen(l:level[0])
+endfunction
+
+function! s:ExtractStatus(line)
+	let l:status = s:ExtractPatternFromLine(a:line, s:patterns['status'])
+	if l:status[0] ==# ' '
+		return 'todo'
+	elseif l:status[0] ==# 'x'
+		return 'done'
+	elseif l:status[0] ==# 'F'
+		return 'failed'
+	elseif l:status[0] ==# '-'
+		return 'cancelled'
+	else
+		echoe 'Unknown task-status in line: '.a:line
+	endif
+endfunction
+
+function! s:ExtractText(line)
+	" remove everything before text
+	let text = substitute(a:line, '\v'.s:pat_notetask, '', '')
+	" remove everything after text
+	let text = substitute(text, '\v\s*'.s:pat_flags.'*.*$', '', '')
+	" TODO remove dates without removing stuff within strings
+	" rules: dates must be written first 
+	return text
+endfunction
+
+function! s:ExtractDate(line)
+	let date = s:ExtractPatternFromLine(a:line, s:patterns['date'])	
+	return len(date) == 0 ? -1 : date[0]
+endfunction
+
+function! s:ExtractRepetition(line)
+	let repetition = s:ExtractPatternFromLine(a:line, s:patterns['repetition'])	
+	return len(repetition) == 0 ? -1 : repetition[0]
+endfunction
+
+function! s:ExtractPriority(line)
+	let priority = s:ExtractPatternFromLine(a:line, s:patterns['priority'])	
+	return len(priority)
+endfunction
+
+function! s:ExtractFlags(line)
+	let flags = s:ExtractPatternFromLine(a:line, s:patterns['flags'])	
+	return flags
+endfunction
+
+function! s:ExtractTags(line)
+	let flags = s:ExtractFlags(a:line)
+	if len(flags) == 0
+		return []
+	else
+		return s:ExtractPatternFromLine(flags[0], s:patterns['tags'])	
+	endif
+endfunction
+
+function! s:ExtractWaiting(line)
+	let flags = s:ExtractFlags(a:line)
+	if len(flags) == 0
+		return []
+	else
+		return s:ExtractPatternFromLine(flags[0], s:patterns['waiting'])	
+	endif
+endfunction
+
+function! s:ExtractBlocking(line)
+	let flags = s:ExtractFlags(a:line)
+	if len(flags) == 0
+		return []
+	else
+		let block = s:ExtractPatternFromLine(flags[0], s:patterns['blocking'])	
+		return len(block) == 0 ? -1 : 1
+endfunction
+
+function! s:ExtractDateAttributes(line)
+	return s:ExtractPatternFromLine(a:line, '\v\{.{-}\}')
+endfunction
 	
-	" remove everything which is not the flag region
-	let l:line = substitute(a:line, '\v^.*--\s', '', '') 
-
-	" extract them
-	return s:ExtractFlagsFromFlagRegion(l:line)
-endfunction
-
-function! s:ExtractNoteFlags(line)
-	return s:ExtractTaskFlags(a:line)
-endfunction
-
-function! s:HasTaskFlags(line)
-	let l:pattern = '\v\s--\s'
-	if match(a:line, l:pattern) == -1
-		return v:false
+function! s:ExtractFromLine(line, ...)
+	" checking parameters
+	if a:0 == 0
+		let all = v:true
+		let what = {}
 	else
-		return v:true
+		let all = v:false
+		let what = a:1
 	endif
+
+	" luts for what to parse
+	let lut_data = [
+		\ { 'id': 's:ExtractId(a:line)' },
+		\ { 'level': 's:ExtractLevel(a:line)' },
+		\ { 'status': 's:ExtractStatus(a:line)' },
+		\ { 'text': 's:ExtractText(a:line)' },
+		\ { 'date': 's:ExtractDate(a:line)' },
+		\ { 'repetition': 's:ExtractRepetition(a:line)' },
+		\ { 'priority': 's:ExtractPriority(a:line)' },
+		\ { 'tags': 's:ExtractTags(a:line)' },
+		\ { 'waiting': 's:ExtractWaiting(a:line)' },
+		\ { 'blocking': 's:ExtractBlocking(a:line)' },
+		\ { 'date-attributes': 's:ExtractDateAttributes(a:line)' },
+	\ ]
+	
+	let data = {}
+
+	for i in lut_data
+		let [type, fnc] = items(i)[0]
+		if all == v:true || has_key(what, type) && what[type] == 1
+			execute 'call extend(data, {"'.type.'" : '.fnc.' })'
+		endif
+	endfor
+	
+	return data
 endfunction
 
-function! s:IsTaskFailed(linenum)
-	let l:line = getline(a:linenum)
-	let l:pattern = '\v\s*-\s\[F\]\s.*$'
-	if match(l:line, l:pattern) == -1
-		return v:false
-	else
-		return v:true
-	endif
+function! s:ExtractTaskData(line)
+	let data = s:ExtractFromLine(a:line, {
+		\ 'id' : 1,
+		\ 'level' : 1,
+		\ 'status' : 1,
+		\ 'text' : 1,
+		\ 'date' : 1,
+		\ 'repetition' : 1,
+		\ 'priority' : 1,
+		\ 'tags' : 1,
+		\ 'waiting' : 1,
+		\ 'blocking' : 1,
+		\ })
+	return extend(s:DataNewTask(), data)
 endfunction
 
-function! s:IsTaskDone(linenum)
-	let l:line = getline(a:linenum)
-	let l:pattern = '\v\s*-\s\[x\]\s.*$'
-	if match(l:line, l:pattern) == -1
-		return v:false
-	else
-		return v:true
-	endif
+function! s:ExtractNoteData(line)
+	let data = s:ExtractFromLine(a:line, {
+		\ 'id' : 1,
+		\ 'level' : 1,
+		\ 'text' : 1,
+		\ 'date' : 1,
+		\ 'repetition' : 1,
+		\ 'priority' : 1,
+		\ 'tags' : 1,
+		\ 'waiting' : 1,
+		\ 'blocking' : 1,
+		\ })
+	return extend(s:DataNewNote(), data)
 endfunction
 
-""""""""""""""""""""""""""
-"				Validation			 "
-""""""""""""""""""""""""""
-
-function! s:ValidateStartDate(start, line)
-	if a:start !~# '\v\d{4}-\d{2}-\d{2}'
-		echoe "Invalid Start Date in: ".a:line
-		return v:false
-	else
-		return v:true
-	endif
+function! s:HasDateOrRepetition(text)
+	return a:text =~# '\v\{.*\}' ? v:true : v:false
 endfunction
 
-function! s:ValidateEndDate(end, line)
-	if a:start !~# '\v\d{4}-\d{2}-\d{2}'
-		echoe "Invalid End Date in: ".a:line
-		return v:false
-	else
-		return v:true
-	endif
-endfunction
-
-function! s:ValidateTime(time, line)
-	if a:start !~# '\v\d{2}:\d{2}'
-		echoe "Invalid Time in:".a:line
-		return v:false
-	else
-		return v:true
-	endif
-endfunction
-
-function! s:ValidateOperator(operator, line)
-	let valid_operators = ['y', 'mo', 'w', 'd']
-	if s:IsInList(a:operator, valid_operators) == v:false
-		echoe "Invalid Operator in:".a:line
-		return v:false
-	else
-		return v:true
-	endif
-endfunction
-
-function! s:ValidateOperand(operand, line)
-	if a:operand !~# '\v\d+'	
-		echoe "Invalid Operand in:".a:line
-		return v:false
-	else
-		return v:true
-	endif
-endfunction
-
-function! s:ValidateDateNumber(line)
-	let l:pattern = '\v\{.{-}\}'
-	let l:dates    = []
-	call substitute(a:line, l:pattern, '\=add(l:dates, submatch(0))', 'g')
-	if len(l:dates) > 1
-		return v:true
-	else
-		return v:false
-	endif
-endfunction
-
-function! s:ValidateTask(line)
+" TODO implement syntax check of other attributes
+" currently implemented:
+" - [x] check: only one date attribute per task/note
+" - [ ] check for anything before the date, except exclamation marks
+" - [x] check: correct date format
+" - [x] check: correct repetition format
+" - [ ] check for matching characters: `"'<([{
+" - [ ] check for any symbols before the first `-`
+" - [ ] check for valid `- [ ]`
+" - [ ] check for valid waiting
+" - [ ] check for valid block
+" - [ ] check for valid id
+" - [ ] check for validk
+function! s:CheckSyntax(line)
+	
 	" remove everyhing between ``
 	let line = substitute(a:line, '\v`[^`]{-}`', '', 'g')
 	
-	" check if the task has more than one date (date or repetition)
-	if s:ValidateDateNumber(line) == v:true
-		echo "ERROR"
-		throw "Task/Note has multiple dates: ".a:line
+	" check if the task multiple dates or date and repetition at the same time
+	if len(s:ExtractDateAttributes(line)) > 1
+		echoe "Task/Note has multiple dates: ".a:line
+		return
 	endif
 
 	" check if the task has a date or repetition
 	if s:HasDateOrRepetition(line) == v:true
 
-		let date = s:ExtractDateFuller(line)
+		let date = s:ExtractPatternFromLine(line, '\v\zs\{.*\}\ze')[0]
 		let pass = v:false
 
 		" check if it is a valid date
-		if date =~# '\v\{((Mon|Tue|Wed|Thu|Fri|Sat|Sun): )?\d{4}-\d{2}-\d{2}\}'
+		if date =~# '\v\{\zs('.s:pat_weekday.')?'.s:pat_datetime.'\ze\}'
 			let pass = v:true
-		" check if it is a valid date with time
-		elseif date =~# '\v\{((Mon|Tue|Wed|Thu|Fri|Sat|Sun): )?\d{4}-\d{2}-\d{2} \d{2}:\d{2}\}'
-			let pass = v:true
-		" check if it is a valid repetition (case 1)
-		elseif date =~# '\v\{((Mon|Tue|Wed|Thu|Fri|Sat|Sun): )?\d{4}-\d{2}-\d{2}\|(y|mo|w|d):\d+\}'
-			let pass = v:true
-		" check if it is a valid repetition (case 1 with time)
-		elseif date =~# '\v\{((Mon|Tue|Wed|Thu|Fri|Sat|Sun): )?\d{4}-\d{2}-\d{2}\|(y|mo|w|d):\d+\ \d{2}:\d{2}\}'
-			let pass = v:true
-		" check if it is a valid repetition (case 2)
-		elseif date =~# '\v\{((Mon|Tue|Wed|Thu|Fri|Sat|Sun): )?\d{4}-\d{2}-\d{2}\|(y|mo|w|d):\d+\|\d{4}-\d{2}-\d{2}\}'
-			let pass = v:true
-		" check if it is a valid repetition (case 2 with time)
-		elseif date =~# '\v\{((Mon|Tue|Wed|Thu|Fri|Sat|Sun): )?\d{4}-\d{2}-\d{2}\|(y|mo|w|d):\d+\|\d{4}-\d{2}-\d{2} \d{2}:\d{2}\}'
+		" check if it is a valid repetition
+		elseif date =~# '\v^\{\zs'.s:pat_datetime.s:pat_repetition.'(\|'.s:pat_datetime.')?\ze\}'
 			let pass = v:true
 		endif
 
 		if pass == v:false
 			echoe "Task has an invalid date or repetition: ".a:line
-			return v:false
+			return
 		endif
 	
 	endif
-
-	return v:true
 	
 endfunction
 
@@ -1534,30 +1454,20 @@ function! s:ParseProjectFile()
 			
 			" is line a Task?	
 			if s:IsLineTask(l:line) == v:true
-				let l:task_name  = s:ExtractTaskName(l:line)
-				let l:task_level = s:ExtractTaskLevel(l:line)
-				let l:flags      = s:ExtractTaskFlags(l:line)
-				let l:newtask    = s:DataAddTask(l:task_name, l:i, l:task_level, l:flags, s:ValidateTask(l:line))
+				call s:CheckSyntax(l:line)
+				let l:task = s:ExtractTaskData(l:line)
+				let l:task = extend(l:task, { 'linenum': l:i, 'line': l:line })
+				call s:DataAddTask(l:task)
 				let l:i += 1
 				continue
 			endif
 			
 			" is line a Note?	
 			if s:IsLineNote(l:line) == v:true
-				let l:note_name   = s:ExtractNoteName(l:line)
-				let l:note_level  = s:ExtractNoteLevel(l:line)
-				let l:flags				= s:ExtractNoteFlags(l:line)
-				call s:DataAddNote(l:note_name, l:i, l:note_level, l:flags, s:ValidateTask(l:line))
-				let l:i += 1
-				continue
-			endif
-
-			" is line a Link?
-			if s:IsLineLink(l:line) == v:true
-				let l:link_project = s:ExtractLinkProject(l:line)
-				let l:link_section = s:ExtractLinkSection(l:line)
-				let l:link_level   = s:ExtractLinkLevel(l:line)
-				call s:DataAddLink(l:link_project, l:link_section, l:i, l:link_level, {})
+				call s:CheckSyntax(l:line)
+				let l:note = s:ExtractNoteData(l:line)
+				let l:note = extend(l:note, { 'linenum': l:i })
+				call s:DataAddNote(l:note)
 				let l:i += 1
 				continue
 			endif
@@ -1575,6 +1485,9 @@ function! s:ParseProjectFile()
 
 endfunction
 
+function! s:NavParsingEnd()
+endfunction
+
 function! s:AfterProjectChange()
 
 	try
@@ -1588,9 +1501,9 @@ function! s:AfterProjectChange()
 		call s:ParseProjectFile()
 		call s:DataUpdateReferences()
 		call s:ParseProjectFile() " yes again
-		call s:DataComputeProgress()
-		call s:DrawSectionOverview()
-		call s:DrawProjectStatistics()
+		" call s:DataComputeProgress()
+		" call s:DrawSectionOverview()
+		" call s:DrawProjectStatistics()
 		" call s:DataSaveJSON()
 
 	catch
@@ -1718,6 +1631,7 @@ function! s:GetNumExclamations(str)
 endfunction
 
 function! s:CmpQfByPriority(e1, e2)
+	" TODO use s:ExtractPriority
 	let [t1, t2] = [s:GetNumExclamations(a:e1.text), s:GetNumExclamations(a:e2.text)]
 	return t1 ># t2 ? -1 : t1 ==# t2 ? 0 : 1
 endfunction
@@ -1757,7 +1671,7 @@ function! s:CmpQfByDate(e1, e2)
 endfunction
 
 function! s:CmpQfById(e1, e2)
-	let [t1, t2] = [s:ExtractIdFull(a:e1.text), s:ExtractIdFull(a:e2.text)]
+	let [t1, t2] = [s:ExtractId(a:e1.text), s:ExtractId(a:e2.text)]
 	return t1 ># t2 ? 1 : t1 ==# t2 ? 0 : -1
 endfunction
 
@@ -1925,14 +1839,6 @@ endfunction
 
 function! s:HasRange(text)
 	if a:text =~# '\v\{.*\d{4}-\d{2}-\d{2}.*\}-\{.*\d{4}-\d{2}-\d{2}.*\}'		
-		return v:true
-	else
-		return v:false
-	endif
-endfunction
-
-function! s:HasDateOrRepetition(text)
-	if a:text =~# '\v\{.*\}'		
 		return v:true
 	else
 		return v:false
@@ -2278,6 +2184,7 @@ function! s:SetQfSyntax()
 endfunction
 command! -nargs=0 VdoSetQfSyntax	:call s:SetQfSyntax()
 
+" TODO USE: ExtractFromLine()
 function! s:FilterQuickfix()
 
 	function! Todo(idx, val)
@@ -2313,7 +2220,7 @@ function! s:FilterQuickfix()
 	endfunction
 
 	function! HasSameID(e1, e2)
-		let [t1, t2] = [s:ExtractIdFull(a:e1.text), s:ExtractIdFull(a:e2.text)]
+		let [t1, t2] = [s:ExtractId(a:e1.text), s:ExtractId(a:e2.text)]
 		return t1 ==# t2 ? 0 : 1
 	endfunction
 
@@ -2510,12 +2417,7 @@ function! s:FilterQuickfix()
 			return
 		endif
 	elseif selections[input-1] ==# 'syntax'
-		if g:vimdoit_quickfix_type ==# 'appointment'
-			call s:SetQfSyntax()
-		else
-			echoe "Quickfix List is not of type appointment."
-			return
-		endif
+		call s:SetQfSyntax()
 	endif
 	
 	" push list
@@ -2589,7 +2491,7 @@ endfunction
 
 function! s:ModifyTaskWaitingRemove(lines)
 	for i in a:lines
-		let blocks = s:ExtractWaitings(getline(i))
+		let blocks = s:ExtractFromLine(getline(i), {'waiting' : 1})
 		let blocks_selection = s:PrependSelectionWithNumbers(blocks)
 		let blocks_selection = extend(blocks_selection, ['all'], 0)
 		let input = confirm('Select ID(s) for "'.getline(i).'": ', join(blocks_selection, "\n"))
@@ -2703,11 +2605,13 @@ function! s:YankTaskPrompt()
 				\ ]
 	let input = confirm('Yank Task Properties: ', join(selections_dialog, "\n"))
 	if selections[input-1] ==# 'id'
-		let @+ = s:ExtractIdFull(getline('.'))
+		let @+ = s:ExtractId(getline('.'))
 		silent echom "ID yanked to \" register."
 	endif
 endfunction
 
+" SECTION: datefile
+" 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 "                               Date File                               "
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -2769,7 +2673,7 @@ function! s:WriteToDateFile(dates, id)
 		" let str = escape(i.text, '~&$.*()|\{}[]<>')
 		let d = s:ExtractDate(i.text)
 		if s:IsInList(d, a:dates) == v:false
-			call add(to_delete, s:ExtractIdFull(getline(i.lnum)))
+			call add(to_delete, s:ExtractId(getline(i.lnum)))
 		endif
 	endfor
 
@@ -2804,6 +2708,7 @@ function! s:WriteToDateFile(dates, id)
 			let [t1, t2] = [s:ExtractDateId(a:e1.text) + 0, s:ExtractDateId(a:e2.text) + 0]
 			return t1 < t2 ? 1 : t1 == t2 ? 0 : -1
 		endfunction
+		
 		call sort(qf, 'CmpQfByDateId')
 		let id_new = s:ExtractDateId(qf[0].text) + 1
 	endif
@@ -2871,7 +2776,7 @@ function s:RemoveUnusedDatesDateFile()
 	" extract ids
 	let ids = []
 	for i in qf
-		call add(ids, s:ExtractId(i.text))	
+		call add(ids, s:GetBaseId(s:ExtractId(i.text)))	
 	endfor
 	
 	" make unique
@@ -2942,7 +2847,7 @@ function! s:UpdateFirstLineOfDateFile()
 endfunction
 	
 function! s:UpdateDateFile()
-	
+
 	" skip when this is a datefile
 	let basename = expand('%:t:r')
 	if basename =~# '\v\..*-date'
@@ -2956,26 +2861,21 @@ function! s:UpdateDateFile()
 	" decide what to do
 	for item in l:tasks['items']
 
-		" abort if task/note has invalid syntax
-		if item.valid_syntax == v:false
-			continue
-		endif
-
 		" check if task has a repetition
-		if s:HasRepetition(item.name) == v:true
+		if s:HasRepetition(item.text) == v:true
 			let dates = []
 			" extract start date
-			let start = s:ExtractStartDateOfRepetition(item.name)
+			let start = s:ExtractStartDateOfRepetition(item.text)
 			" extract end date
-			let end = s:ExtractEndDateOfRepetition(item.name)
+			let end = s:ExtractEndDateOfRepetition(item.text)
 			" extract time
-			let time = s:ExtractTimeOfRepetition(item.name)
+			let time = s:ExtractTimeOfRepetition(item.text)
 			" extract repetition operator
-			let operator = s:ExtractRepetitionOperator(item.name)
+			let operator = s:ExtractRepetitionOperator(item.text)
 			" extract repetition operand
-			let operand = s:ExtractRepetitionOperand(item.name)
+			let operand = s:ExtractRepetitionOperand(item.text)
 
-			" echom "line:".item.name
+			" echom "line:".item.text
 			" echom "start:".start
 			" echom "end:".end
 			" echom "time:".time
@@ -3007,7 +2907,7 @@ function! s:UpdateDateFile()
 				
 			let cur   = start
 			while cur <=# limit && cur <=# end
-				let text = substitute(item.name, '\v\{.*\|[a-z]{1,2}:.*(\|.*)?\}', '{'.cur.time.'}', '')
+				let text = substitute(item.text, '\v\{.*\|[a-z]{1,2}:.*(\|.*)?\}', '{'.cur.time.'}', '')
 				if item.type ==# 'task'
 					let text = '- [ ] '.text
 				elseif item.type ==# 'note'
