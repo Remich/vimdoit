@@ -1355,6 +1355,12 @@ function! s:HasDateOrRepetition(text)
 	return a:text =~# '\v\{.*\}' ? v:true : v:false
 endfunction
 
+function! s:ErrorLine(linenum)
+	execute 'normal '.a:linenum.'gg0'
+	execute 'syntax match VdoError "\v%'.a:linenum.'l.*"'
+	highlight link VdoError Error
+endfunction
+
 " TODO implement syntax check of other attributes
 " currently implemented:
 " - [x] check: only one date attribute per task/note
@@ -1368,13 +1374,14 @@ endfunction
 " - [ ] check for valid block
 " - [ ] check for valid id
 " - [ ] check for validk
-function! s:CheckSyntax(line)
+function! s:CheckSyntax(line, linenum)
 	
 	" remove everyhing between ``
 	let line = substitute(a:line, '\v`[^`]{-}`', '', 'g')
 	
 	" check if the task multiple dates or date and repetition at the same time
 	if len(s:ExtractDateAttributes(line)) > 1
+		call s:ErrorLine(a:linenum)
 		echoe "Task/Note has multiple dates: ".a:line
 		return
 	endif
@@ -1394,6 +1401,7 @@ function! s:CheckSyntax(line)
 		endif
 
 		if pass == v:false
+			call s:ErrorLine(a:linenum)
 			echoe "Task has an invalid date or repetition: ".a:line
 			return
 		endif
@@ -1410,8 +1418,6 @@ function! s:ParseProjectFile()
 
 	call s:SaveLocation()
 	call s:DataInit()
-
-	try
 	
 		let l:cur_line_num   = 0
 		let l:total_line_num = line('$')
@@ -1467,7 +1473,7 @@ function! s:ParseProjectFile()
 			
 			" is line a Task?	
 			if s:IsLineTask(l:line) == v:true
-				call s:CheckSyntax(l:line)
+				call s:CheckSyntax(l:line, l:i)
 				let l:task = s:ExtractTaskData(l:line)
 				let l:task = extend(l:task, { 'linenum': l:i, 'line': l:line })
 				call s:DataAddTask(l:task)
@@ -1477,7 +1483,7 @@ function! s:ParseProjectFile()
 			
 			" is line a Note?	
 			if s:IsLineNote(l:line) == v:true
-				call s:CheckSyntax(l:line)
+				call s:CheckSyntax(l:line, l:i)
 				let l:note = s:ExtractNoteData(l:line)
 				let l:note = extend(l:note, { 'linenum': l:i })
 				call s:DataAddNote(l:note)
@@ -1490,11 +1496,6 @@ function! s:ParseProjectFile()
 
 		let l:last_section        = s:DataUpdateEndOfEachSection(s:project_tree["sections"])
 		let l:last_section['end'] = line('$')
-
-	catch
-		echom "vimdoit:  Exception  in ".v:throwpoint.":"
-		echom v:exception
-	endtry
 
 	call s:RestoreLocation()
 
@@ -1511,10 +1512,10 @@ endfunction
 
 function! s:AfterProjectChange()
 
+	" skip if datefile
+	if s:IsDateFile() == v:true | return | endif
+
 	try
-		" skip if datefile
-		if s:IsDateFile() == v:true | return | endif
-		
 		call s:ParseProjectFile()
 		call s:DataUpdateReferences()
 		call s:UpdateDates()
@@ -1525,10 +1526,8 @@ function! s:AfterProjectChange()
 		call s:DrawSectionOverview()
 		call s:DrawProjectStatistics()
 		" call s:DataSaveJSON()
-
 	catch
-		echom "vimdoit:  Exception  in ".v:throwpoint.":"
-		echom "   ".v:exception	
+		echoerr v:exception
 	endtry
 	
 endfunction
