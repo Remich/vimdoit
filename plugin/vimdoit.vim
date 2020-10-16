@@ -1378,6 +1378,12 @@ function! s:CheckSyntax(line, linenum)
 	" remove everything between ``
 	let line = substitute(a:line, '\v`[^`]{-}`', '', 'g')
 
+	" check if task/note has a valid indicator (`- …` or `- [ ]`)
+	if line =~# '\v^\s*-\zs[^ -]\ze(\[.\])?'
+		call s:SyntaxError(a:linenum, 'Invalid task/note indicator (`- …` or `- [ ]`). Maybe you used tabs instead of spaces?')
+		return
+	endif
+
 	" extract date attributes
 	let date_attributes = s:ExtractDateAttributes(line)
 	
@@ -1419,6 +1425,7 @@ function! s:CheckSyntax(line, linenum)
 endfunction
 
 " use like: `bufdo ParseFile`
+" you should clear your quickfix list first
 command! ParseFile :call s:ParseFileGlobal()
 " this function should only be called from the user-command ParseFile
 function! s:ParseFileGlobal()
@@ -1426,6 +1433,11 @@ function! s:ParseFileGlobal()
 	if len(s:syntax_errors) > 0
 		call setqflist(s:syntax_errors, 'a')
 		echoerr "Syntax errors in ".expand('%').". See error list."
+	endif
+
+	if len(getqflist()) == 0
+		" remove error highlights
+		highlight link VdoError None
 	endif
 endfunction
 
@@ -1489,6 +1501,7 @@ function! s:ParseFile()
 			continue
 		endif
 		
+		echom l:line
 		" is line a Task?	
 		if s:IsLineTask(l:line) == v:true
 			call s:CheckSyntax(l:line, l:i)

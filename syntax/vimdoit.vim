@@ -173,6 +173,10 @@ syntax region TaskCancelled start="\v^\t{13}- \[-\]+" skip="\v^\t{14,}" end="^" 
 syntax region TaskCancelled start="\v^\t{14}- \[-\]+" skip="\v^\t{15,}" end="^" contains=TaskCancelledMarker,FlagID
 " TODO other Task failed levels
 
+" highlight invalid task/note indicator
+syntax match InvalidTaskNoteIndicator "\v^-\zs[^ -]\ze(\[.\])?"
+highlight link InvalidTaskNoteIndicator Error
+
 highlight link TaskDone NerdTreeDir
 highlight link TaskFailed NerdTreeDir
 highlight link TaskCancelled NerdTreeDir
