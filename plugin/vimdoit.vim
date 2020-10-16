@@ -23,8 +23,8 @@ if exists("g:vimdoit_projectsdir") == v:false
 	finish
 endif
 
-" check if dateutils are installed
-let s:tools = ['dateadd', 'dround']
+" check if necessary tools are installed
+let s:tools = ['diff', 'dateadd', 'dround']
 
 for t in s:tools
 	if trim(system("whereis ".t)) ==# t.":"
@@ -85,6 +85,18 @@ endfunction
 function! s:SaveBuffers()
 	" get list of all listed buffers
 	return getbufinfo({'buflisted':1})	 
+endfunction
+
+function! s:MaybeDeleteBuffer(buffers_save)
+	" get current buffer number
+	let nr = bufnr()
+	for b in a:buffers_save
+		if b['bufnr'] == nr
+			return
+		endif
+	endfor
+	" delete buffer
+	silent! bdelete
 endfunction
 
 function! s:RestoreBuffers(buffers)
@@ -638,15 +650,9 @@ function! s:GetNumOccurences(pat)
 	call s:SaveLocation()
 	" save register
 	let l:save_a = @a
-	" go to project root
-	execute 'cd '.g:vimdoit_projectsdir
-	" save buffers
-	let buffers_save = s:SaveBuffers()
-	" open all `.vdo` files, including hidden ones
-	args ./**/*.vdo ./**/.*.vdo
 	" clear register a
 	let @a = ''
-	" check if ID is already in use
+	" find ids
 	execute 'silent! bufdo global/'.a:pat.'/yank A'
 	" save  result
 	let l:res = @a
@@ -654,8 +660,6 @@ function! s:GetNumOccurences(pat)
 	let @a = l:save_a
 	" restore location
 	call s:RestoreLocation()
-	" restore buffers
-	call s:RestoreBuffers(buffers_save)
 	" return found occurences
 	return len(split(l:res, '\n'))
 endfunction
@@ -739,55 +743,43 @@ function! s:DataFindChanges()
 	return l:lines
 endfunction
 
-function! s:DataGetIDOfLine(line)
-	let l:pattern = '\v0x(\x{8}(\|\d+)?)'
-	let l:id    = []
-	call substitute(a:line, l:pattern, '\=add(l:id, submatch(1))', 'g')
-	
-	if len(l:id) == 0
-		return -1
-	else
-		return l:id[0]
-	endif
+function! s:ReplaceLineWithTask(task)
+	" change the level accordingly
+	let a:task['level'] = s:ExtractFromString(getline('.'), {'level':1})['level']
+	call setline('.', s:CompileTaskString(a:task))
 endfunction
 
 function! s:DataUpdateReferences()
 	echom "Updating references of file ".expand('%')
 	" save location
 	call s:SaveLocation()
-	" go to projects root
-	execute "cd ".g:vimdoit_projectsdir
 	" make sure that all tasks/notes have an ID
 	call s:DataCheckIDs()
 	" get the changed lines
 	let l:changedlines = s:DataFindChanges()
 	" no changes, abort
 	if len(l:changedlines) == 0 | return | endif
-	" save buffers
-	let buffers_save = s:SaveBuffers()
-	" open all files
-	args ./**/*.vdo
-	args ./**/.*.vdo
 
 	" update references of changed lines, if there are any
-	for i in l:changedlines
-		" get ID of line
-		let l:id = substitute(s:DataGetIDOfLine(i), '\v\|', '\\\|', '')
-		" get line without indendation
-		let l:replace = substitute(i, '\v^\s*', '', 'g')
-		" escaping of special characters
-		let l:replace_esc = escape(l:replace, '~&$.*()|\{}[]<>')
-		" line does not have an ID, so skip
-		if l:id == -1 | continue | endif
-		" actual updating of references
-		execute 'silent! bufdo global/\v\s0x'.l:id.'(\s|$)/substitute/\v^\s*\zs.*\ze$/'.l:replace_esc.'/g'
+	for line in l:changedlines
+		" check if line is task or note
+		if s:IsLineTask(line) == v:false && s:IsLineNote(line) == v:false
+			continue
+		endif
+		" get data
+		let task = s:ExtractLineData(line)
+		" check if line has an id
+		if task['id'] == -1 | continue | endif
+		" escape id
+		let id = escape(task['id'], '|')
+		" updating of references
+		execute 'silent! bufdo global/\v<0x'.id.'(\s|$)>/call s:ReplaceLineWithTask(task)'
 	endfor
 
 	" save changed buffers
 	execute 'silent! bufdo update'
 	" restore original location
 	call s:RestoreLocation()
-	call s:RestoreBuffers(buffers_save)
 endfunction
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -1309,6 +1301,16 @@ function! s:ExtractFromString(str, ...)
 	return data
 endfunction
 
+function! s:ExtractLineData(line)
+	if s:IsLineTask(a:line) == v:true
+		return s:ExtractTaskData(a:line)
+	elseif s:IsLineNote(a:line) == v:true
+		return s:ExtractNoteData(a:line)
+	else
+		echoerr "Line is neigher task nor note: ".a:line
+	endif
+endfunction
+
 function! s:ExtractTaskData(line)
 	let data = s:ExtractFromString(a:line, {
 		\ 'id' : 1,
@@ -1560,7 +1562,7 @@ function! s:BeforeProjectWrite()
 	
 	call s:DataUpdateReferences()
 	call s:UpdateDates()
-	" call s:CleanUpDatefile()
+	call s:CleanUpDatefile()
 	call s:UpdateFirstLineOfDateFile()
 	call s:ParseFile() " yes again
 	call s:DataComputeProgress()
@@ -2737,7 +2739,6 @@ function! s:UpdateFirstLineOfDateFile()
 	update!
 	let buf = bufnr()
 	call s:RestoreLocation()
-	execute buf.'bdelete!'
 endfunction
 
 " TODO move to utility
@@ -2827,11 +2828,18 @@ function! s:CompileTaskString(task)
 		\'cancelled' : '-',
 		\ }
 
+	" indendation / level
+	let i = 0
+	while i < t['level']
+		let str = str.'	'
+		let i = i + 1
+	endwhile
+
 	" task or note
 	if t['type'] ==# 'note'
-		let str = '- '
+		let str = str.'- '
 	elseif t['type'] ==# 'task'
-		let str = '- ['.lut[t['status']].']'
+		let str = str.'- ['.lut[t['status']].']'
 	endif
 
 	" priority
@@ -2867,6 +2875,36 @@ function! s:CompileTaskString(task)
 
 		let time = time.'}'
 		let str = str.' '.time
+	" repetition
+	elseif empty(t['repetition']) == v:false
+		let rep = t['repetition']	
+		let time = '{'
+
+		" startdate
+		if rep['startdate'] != -1
+			let time = time.rep['startdate']
+		endif
+
+		" starttime
+		if rep['starttime'] != -1
+			let time = time.' '.rep['starttime']
+		endif
+
+		" operator & operand
+		let time = time.'|'.rep['operator'].':'.rep['operand']
+
+		" enddate
+		if rep['enddate'] != -1
+			let time = time.rep['enddate']
+		endif
+
+		" endtime
+		if rep['endtime'] != -1
+			let time = time.' '.rep['endtime']
+		endif
+		
+		let time = time.'}'
+		let str = str.' '.time
 	endif
 
 	" text
@@ -2899,9 +2937,10 @@ endfunction
 function! s:ExtendLineWithTask(t1, dates)
 	" skip if datefile
 	if s:IsDateFile() == v:true | return | endif
+	
 	let line = getline('.')
 	" check if date is in datelist
-	let t2       = s:ExtractTaskData(line)
+	let t2       = s:ExtractLineData(line)
 	let datetime = {}
 	let idx      = 0
 	while idx < len(a:dates)
@@ -2917,22 +2956,12 @@ function! s:ExtendLineWithTask(t1, dates)
 	if empty(datetime) == v:true
 		return
 	endif
+	echom "extending line: ".line
 	" extend & set
-	let tnew = s:ExtendTask(t2, a:t1)
+	let tnew                 = s:ExtendTask(t2, a:t1)
 	let tnew['date']['time'] = datetime['time']
-	let str = s:CompileTaskString(tnew)
+	let str                  = s:CompileTaskString(tnew)
 	call setline('.', str)
-endfunction
-
-function! s:UpdateDateReferences(task, dates)
-	" get list of all listed buffers
-	let buffers = getbufinfo({'buflisted':1})	 
-	" open all projects (no datefiles!)
-	" this will blow up, when we opened vim with `.randomproject-dates.vdo`
-	" WORKAROUND: check in `s:ExtendLineWithTask()`, if the file is a datefile
-	args ./**/*.vdo
-	" find all auto-generated tasks with same id
-	execute 'silent! argdo global/\v<0x'.a:task['id'].'(\|\d+)>/call s:ExtendLineWithTask(a:task, a:dates)'
 endfunction
 
 function! s:UpdateDatefile(datefile, task, dates)
@@ -3010,43 +3039,35 @@ function! s:UpdateDates()
 	if len(s:changedlines) == 0 | return | endif
 	" save location
 	call s:SaveLocation()
-	" save buffers
-	let buffers_save = s:SaveBuffers()
+	" get datefile for later
+	let datefile = s:GetDatefileName() 
 
-	let bufnr    = bufnr()
-	let datefile = s:GetDatefileName()
-
-	" decide what to do
 	for line in s:changedlines
 		" check if line is task or note
-		if s:IsLineTask(l:line) == v:false && s:IsLineNote(line) == v:false
+		if s:IsLineTask(line) == v:false && s:IsLineNote(line) == v:false
 			continue
 		endif
 		
 		let s:used_dates = []
 		let s:used_ids   = []
-
-		let task = s:ExtractTaskData(line)
-
+		" get data
+		let task = s:ExtractLineData(line)
 		" check if line has a repetition
 		if empty(task['repetition']) == v:true
 			continue
 		endif
-		
 		" generate list of dates from repetition
 		let dates = s:GenerateDatesFromRepetition(task)
-		" grep and update already existing dates, which are not in a datefile
-		call s:UpdateDateReferences(task, dates)
+		" update references of auto-generated tasks in arglist
+		execute 'silent! bufdo global/\v<0x'.task['id'].'(\|\d+)>/call s:ExtendLineWithTask(task, dates)'
 		" update the dates in the datefile
 		call s:UpdateDatefile(datefile, task, dates)
 	endfor
 
 	" save changes
-	silent bufdo update
+	execute 'silent! bufdo update'
 	" restore location
 	call s:RestoreLocation()
-	" restore buffers
-	call s:RestoreBuffers(buffers_save)
 endfunction
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -3092,6 +3113,9 @@ augroup VimDoit
 	autocmd BufEnter *.vdo setlocal noswapfile
 	autocmd BufWritePre *.vdo call s:BeforeProjectWrite()
 augroup END
+
+" open all files
+execute 'argadd '.g:vimdoit_projectsdir.'/**/*.vdo '.g:vimdoit_projectsdir.'/**/.*.vdo'
 
 " Restore user's options.
 let &cpo = s:save_cpo
