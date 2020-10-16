@@ -46,7 +46,7 @@ syntax match Appointment "\v\{.{-}\}"
 highlight link Appointment Constant
 
 " Inner Headline
-syntax match InnerHeadline "\v^\s*\(.*\)"
+syntax match InnerHeadline "\v^#+.*$"
 highlight link InnerHeadline Orange
 
 " URLs

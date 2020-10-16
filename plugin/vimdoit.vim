@@ -1501,7 +1501,6 @@ function! s:ParseFile()
 			continue
 		endif
 		
-		echom l:line
 		" is line a Task?	
 		if s:IsLineTask(l:line) == v:true
 			call s:CheckSyntax(l:line, l:i)
@@ -1540,7 +1539,7 @@ function! s:IsDateFile()
 	return basename =~# '\v\..*-date'
 endfunction
 
-function! s:AfterProjectChange()
+function! s:BeforeProjectWrite()
 
 	" skip if datefile
 	if s:IsDateFile() == v:true | return | endif
@@ -2724,7 +2723,12 @@ endfunction
 
 function! s:UpdateFirstLineOfDateFile()
 	echom "Updating first line datefile of file ".expand('%')
+	" check if project has any tags
 	if has_key(s:project_tree['flags'], 'tag') == v:false
+		return
+	endif
+	" only continue if there is already a datefile
+	if filereadable(s:GetDatefileName()) == v:false
 		return
 	endif
 	call s:SaveLocation()
@@ -2960,6 +2964,11 @@ function! s:CleanUpDatefile()
 	" skip if datefile
 	if s:IsDateFile() == v:true | return | endif
 
+	" skip if there is not datefile
+	if filereadable(s:GetDatefileName()) == v:false
+		return
+	endif
+
 	" save location
 	call s:SaveLocation()
 	
@@ -3081,7 +3090,7 @@ augroup VimDoit
 	" TODO maybe this won't be necessary anymore, after we switched to using
 	" `global
 	autocmd BufEnter *.vdo setlocal noswapfile
-	autocmd BufWritePre *.vdo call s:AfterProjectChange()
+	autocmd BufWritePre *.vdo call s:BeforeProjectWrite()
 augroup END
 
 " Restore user's options.
