@@ -1340,10 +1340,6 @@ function! s:ExtractNoteData(line)
 	return note
 endfunction
 
-function! s:HasDateOrRepetition(text)
-	return a:text =~# '\v\{.*\}' ? v:true : v:false
-endfunction
-
 function! s:ErrorLine(linenum)
 	execute 'normal '.a:linenum.'gg0'
 	execute 'syntax match VdoError "\v%'.a:linenum.'l.*"'
@@ -1353,7 +1349,7 @@ endfunction
 " TODO implement syntax check of other attributes
 " currently implemented:
 " - [x] check: only one date attribute per task/note
-" - [ ] check for anything before the date, except 
+" - [x] check: for anything before the date, except `!` and whitespaces
 " - [x] check: correct date format
 " - [x] check: correct repetition format
 " - [ ] check for matching characters: `"'<([{
@@ -1362,26 +1358,41 @@ endfunction
 " - [ ] check for valid waiting
 " - [ ] check for valid block
 " - [ ] check for valid id
-" - [ ] check for validk
+" - [ ] check for valid
 function! s:CheckSyntax(line, linenum)
 	
-	" remove everyhing between ``
+	" remove everything between ``
 	let line = substitute(a:line, '\v`[^`]{-}`', '', 'g')
+
+	" extract date attributes
+	let date_attributes = s:ExtractDateAttributes(line)
 	
-	" check if the task multiple dates or date and repetition at the same time
-	if len(s:ExtractDateAttributes(line)) > 1
+	" check if the task has multiple date-attributes (`{...}´)
+	if len(date_attributes) > 1
 		call s:ErrorLine(a:linenum)
 		echoe "Task/Note has multiple dates: ".a:line
 		return
-	endif
+	" check if task has a date or repetition
+	elseif len(date_attributes) == 1
 
-	" check if the task has a date or repetition
-	if s:HasDateOrRepetition(line) == v:true
-
-		let date = s:ExtractPatternFromString(line, '\v\zs\{.*\}\ze')[0]
 		let pass = v:false
+		
+		" remove task/note indicator
+		let line2 = substitute(line, '\v('.s:pat_task.'|'.s:pat_note.')', '', '')
+		
+		" check for any characters except `!` before the date-attribute
+		" remove all `!` and spaces before date-attribute
+		let line3 = substitute(line2, '\v(!|\s)', '', 'g')
+		echom line3
+		" check
+		if line3 =~# '\v^\zs.+\ze\{.*\}'
+			call s:ErrorLine(a:linenum)
+			echoe "Forbidden characters (allowed: ! and whitespaces) found before the date-attribute: ".a:line
+			return
+		endif
 
 		" check if it is a valid date
+		let date = date_attributes[0]
 		if date =~# '\v\{\zs('.s:pat_weekday.')?'.s:pat_datetime.'\ze\}'
 			let pass = v:true
 		" check if it is a valid repetition
@@ -1394,9 +1405,11 @@ function! s:CheckSyntax(line, linenum)
 			echoe "Task has an invalid date or repetition: ".a:line
 			return
 		endif
-	
 	endif
-	
+
+	" remove highlights
+	highlight link VdoError None
+
 endfunction
 
 " Iterates over every line of the file exactly once!
@@ -1508,7 +1521,7 @@ function! s:AfterProjectChange()
 		call s:ParseProjectFile()
 		call s:DataUpdateReferences()
 		call s:UpdateDates()
-		call s:CleanUpDatefile()
+		" call s:CleanUpDatefile()
 		call s:UpdateFirstLineOfDateFile()
 		call s:ParseProjectFile() " yes again
 		call s:DataComputeProgress()

@@ -76,7 +76,7 @@ syntax match FlagWaiting "\v\~\x{8}" contained
 highlight link FlagWaiting String
 
 " Flag ID ('0x8c3d19d5')
-syntax match FlagID "\v0x\x{8}(\|\d+)?" contained conceal
+syntax match FlagID "\v0x\x{8}(\|\d+)?(\s+)?" contained conceal
 highlight link FlagID NerdTreeDir
 
 " Flag ordinary tag ('#SOMESTRING')
