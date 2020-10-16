@@ -371,7 +371,7 @@ function! s:DataNewTask()
 		\ 'level'				: 0,
 		\ 'status'			: 'todo',
 		\ 'text'				: 'BE: like water',
-		\ 'appointment'	: {},
+		\ 'date'				: {},
 		\ 'repetition'	: {},
 		\ 'priority'		: 0,
 		\ 'tags'				: [],
@@ -391,7 +391,7 @@ function! s:DataNewNote()
 		\ 'id'					: -1,
 		\ 'level'				: 0,
 		\ 'text'				: 'BE: like water',
-		\ 'appointment'	: {},
+		\ 'date'				: {},
 		\ 'repetition'	: {},
 		\ 'priority'		: 0,
 		\ 'tags'				: [],
@@ -1182,21 +1182,50 @@ function! s:ExtractText(line)
 	let text = substitute(text, '\v\s*'.s:pat_flags.'*.*$', '', '')
 	" remove leading exclamation marks
 	let text = substitute(text, '\v^\s*!*\s', '', '')
-	" remove leading appointments
+	" remove leading dates
 	let text = substitute(text, '\v^\{.{-}\}', '', '')
-	" TODO remove dates without removing stuff within strings
-	" rules: dates must be written first 
 	return trim(text)
+endfunction
+
+function! s:ExtractDateData(str)
+
+	function! s:ExtractDateAttr(str, pat)
+		let res = s:ExtractPatternFromString(a:str, a:pat)
+		return len(res) == 0 ? -1 : res[0]
+	endfunction
+	
+	return {
+			\ 'weekday': s:ExtractDateAttr(a:str, '\v^\zs'.s:pat_weekday.'\ze'),
+			\ 'date': s:ExtractDateAttr(a:str, '\v'.s:pat_date.'\ze'),
+			\ 'time': s:ExtractDateAttr(a:str, '\v'.s:pat_time.'\ze'),
+	\ }
 endfunction
 
 function! s:ExtractDate(line)
 	let date = s:ExtractPatternFromString(a:line, s:patterns['date'])	
-	return len(date) == 0 ? -1 : date[0]
+	return len(date) == 0 ? {} : s:ExtractDateData(date[0])
+endfunction
+
+function! s:ExtractRepetitionData(str)
+
+	function! s:ExtractRepetitionAttr(str, pat)
+		let res = s:ExtractPatternFromString(a:str, a:pat)
+		return len(res) == 0 ? -1 : res[0]
+	endfunction
+	
+	return {
+			\ 'startdate': s:ExtractRepetitionAttr(a:str, '\v^\zs'.s:pat_date.'\ze'),
+			\ 'starttime': s:ExtractRepetitionAttr(a:str, '\v^'.s:pat_date.' \zs'.s:pat_time.'\ze'),
+			\ 'operator':  s:ExtractRepetitionAttr(a:str, '\v^'.s:pat_datetime.'\|\zs'.s:pat_rep_operator.'\ze'),
+			\ 'operand':	 s:ExtractRepetitionAttr(a:str, '\v^'.s:pat_datetime.'\|'.s:pat_rep_operator.':\zs'.s:pat_rep_operand.'\ze'),
+			\ 'enddate':	 s:ExtractRepetitionAttr(a:str, '\v^'.s:pat_datetime.'\|[^|]*\|\zs'.s:pat_date.'\ze'),
+			\ 'endtime':	 s:ExtractRepetitionAttr(a:str, '\v^'.s:pat_datetime.'\|[^|]*\|'.s:pat_date.' \zs'.s:pat_time.'\ze'),
+	\ }
 endfunction
 
 function! s:ExtractRepetition(line)
 	let repetition = s:ExtractPatternFromString(a:line, s:patterns['repetition'])	
-	return len(repetition) == 0 ? -1 : repetition[0]
+	return len(repetition) == 0 ? {} : s:ExtractRepetitionData(repetition[0])
 endfunction
 
 function! s:ExtractPriority(line)
@@ -1251,7 +1280,6 @@ function! s:ExtractFromString(str, ...)
 	endif
 
 	" luts for what to parse
-	" TODO rename attribute `date` to appointment
 	let lut_data = [
 		\ { 'id': 's:ExtractId(a:str)' },
 		\ { 'baseid': 's:ExtractBaseId(a:str)' },
@@ -1293,10 +1321,6 @@ function! s:ExtractTaskData(line)
 		\ 'blocking' : 1,
 		\ })
 	let task = extend(s:DataNewTask(), data)
-	let task['appointment'] = task['date'] == -1 ? {} : s:ExtractAppointmentData(task['date'])
-	unlet task['date']
-	let rep = task['repetition']
-	let task['repetition'] = rep == -1 ? {} : s:ExtractRepetitionData(rep)
 	return task
 endfunction
 
@@ -1313,42 +1337,7 @@ function! s:ExtractNoteData(line)
 		\ 'blocking' : 1,
 		\ })
 	let note = extend(s:DataNewTask(), data)
-	let ap = note['date']
-	let note['appointment'] = ap == -1 ? {} : s:ExtractAppointmentData(ap)
-	let rep = note['repetition']
-	let note['repetition'] = rep == -1 ? {} : s:ExtractRepetitionData(rep)
 	return note
-endfunction
-
-function! s:ExtractRepetitionData(str)
-
-	function! s:ExtractRepetitionAttr(str, pat)
-		let res = s:ExtractPatternFromString(a:str, a:pat)
-		return len(res) == 0 ? -1 : res[0]
-	endfunction
-	
-	return {
-			\ 'startdate': s:ExtractRepetitionAttr(a:str, '\v^\zs'.s:pat_date.'\ze'),
-			\ 'starttime': s:ExtractRepetitionAttr(a:str, '\v^'.s:pat_date.' \zs'.s:pat_time.'\ze'),
-			\ 'operator':  s:ExtractRepetitionAttr(a:str, '\v^'.s:pat_datetime.'\|\zs'.s:pat_rep_operator.'\ze'),
-			\ 'operand':	 s:ExtractRepetitionAttr(a:str, '\v^'.s:pat_datetime.'\|'.s:pat_rep_operator.':\zs'.s:pat_rep_operand.'\ze'),
-			\ 'enddate':	 s:ExtractRepetitionAttr(a:str, '\v^'.s:pat_datetime.'\|[^|]*\|\zs'.s:pat_date.'\ze'),
-			\ 'endtime':	 s:ExtractRepetitionAttr(a:str, '\v^'.s:pat_datetime.'\|[^|]*\|'.s:pat_date.' \zs'.s:pat_time.'\ze'),
-	\ }
-endfunction
-
-function! s:ExtractAppointmentData(str)
-
-	function! s:ExtractAppointmentAttr(str, pat)
-		let res = s:ExtractPatternFromString(a:str, a:pat)
-		return len(res) == 0 ? -1 : res[0]
-	endfunction
-	
-	return {
-			\ 'weekday': s:ExtractAppointmentAttr(a:str, '\v^\zs'.s:pat_weekday.'\ze'),
-			\ 'date': s:ExtractAppointmentAttr(a:str, '\v'.s:pat_date.'\ze'),
-			\ 'time': s:ExtractAppointmentAttr(a:str, '\v'.s:pat_time.'\ze'),
-	\ }
 endfunction
 
 function! s:HasDateOrRepetition(text)
@@ -1527,7 +1516,7 @@ function! s:AfterProjectChange()
 		call s:DrawProjectStatistics()
 		" call s:DataSaveJSON()
 	catch
-		echoerr v:exception
+		echoerr v:exception.' in '.v:throwpoint
 	endtry
 	
 endfunction
@@ -1787,7 +1776,7 @@ function! s:GrepProjectsByTag(tag, path)
 endfunction
 command! -nargs=? GrepFocused	:call s:GrepProjectsByTag()
 
-function! s:GrepTasksWithInvalidAppointment(path)
+function! s:GrepTasksWithInvalidDate(path)
 
 	call vimdoit_utility#SaveCfStack()
 	call vimdoit_utility#SaveOptions()
@@ -1803,7 +1792,7 @@ function! s:GrepTasksWithInvalidAppointment(path)
 		execute "cd ".a:path
 	endif	
 	
-	" 1. grep all appointments
+	" 1. grep all dates
 	let pattern = "\\{.*\\}"
 	execute 'silent! grep! --type-add '"vimdoit:*.vdo"' -t vimdoit "'.pattern.'" '.file
 	let l:qf_all = getqflist()
@@ -1816,7 +1805,7 @@ function! s:GrepTasksWithInvalidAppointment(path)
 	endif
 
 
-	" 2. grep all valid appointments
+	" 2. grep all valid dates
 	let pattern = "\\{.*\\d{4}-\\d{2}-\\d{2}.*\\}"
 	execute 'silent! grep! --type-add '"vimdoit:*.vdo"' -t vimdoit "'.pattern.'" '.file | copen
 	let l:qf_valid = getqflist()
@@ -1828,7 +1817,7 @@ function! s:GrepTasksWithInvalidAppointment(path)
 		return
 	endif
 
-	" 3. filter valid appointments from all
+	" 3. filter valid dates from all
 	let l:qf_new = []
 	for d in l:qf_all
 
@@ -1849,7 +1838,7 @@ function! s:GrepTasksWithInvalidAppointment(path)
 	call vimdoit_utility#RestoreCfStack()
 	
 	" push new list
-	" call setqflist(l:qf_new, 'a', {'title' : 'tasks: invalid appointment'})
+	" call setqflist(l:qf_new, 'a', {'title' : 'tasks: invalid date'})
 	call setqflist(l:qf_new, 'a')
 	
 	call vimdoit_utility#RestoreOptions()
@@ -1874,16 +1863,23 @@ function! s:NicenQfByDate(qf)
 	while idx < len(a:qf)
 
 		let date = s:ExtractDate(a:qf[idx].text)
-		let day = trim(system('date --date='.date.' +%A'))
-		let week = trim(system('date --date='.date.' +%V'))
-		let month = trim(system('date --date='.date.' +%B'))
-		let year = trim(system('date --date='.date.' +%Y'))
+		" TODO remove #cur
+		" CHECK: syntax where the date is placed! Otherwise the following will
+		" throw errors
+		if empty(date) == v:true
+			echom a:qf[idx].text
+		endif
+		
+		let day = trim(system('date --date='.date['date'].' +%A'))
+		let week = trim(system('date --date='.date['date'].' +%V'))
+		let month = trim(system('date --date='.date['date'].' "+%B"'))
+		let year = trim(system('date --date='.date['date'].' +%Y'))
 
 		let inc = 1
 		let insert = []
 
 		if day_prev !=# day
-			call add(insert, day.', '.date.':')
+			call add(insert, day.', '.date['date'].':')
 			call add(insert, '')
 		endif
 		
@@ -1966,9 +1962,9 @@ function! s:GrepTasksByStatus(status, path)
 	elseif a:status ==# 'scheduled'
 		let pattern = "\\{.*\\}"
 		let title = 'tasks: scheduled'
-	elseif a:status ==# 'appointment'
+	elseif a:status ==# 'date'
 		let pattern = "\\{\\s*\\d{4}-\\d{2}-\\d{2}(\\s*\\d{2}:\\d{2})?\\s*\\}"
-		let title = 'tasks: appointment'
+		let title = 'tasks: date'
 	elseif a:status ==# 'repetition'
 		let pattern = "\\{\\s*\\d{4}-\\d{2}-\\d{2}\\\\|[a-z]{1,2}:.*\\}"
 		let title = 'tasks: repetition'
@@ -1978,11 +1974,11 @@ function! s:GrepTasksByStatus(status, path)
 
 	let l:qf = getqflist()
 
-	if a:status ==# 'appointment'
+	if a:status ==# 'date'
 		" sort by date
 		call sort(l:qf, 's:CmpQfByDate')
 		let title = s:ModifyQfTitle(title, 'add', 'sort', 'date')
-		let g:vimdoit_quickfix_type = 'appointment'
+		let g:vimdoit_quickfix_type = 'date'
 	else
 		" sort by priority
 		call sort(l:qf, 's:CmpQfByPriority')
@@ -2065,9 +2061,9 @@ function! s:GrepTasks(where)
 				\ 'waiting',
 				\ 'block',
 				\ 'scheduled',
-				\ 'appointment',
+				\ 'date',
 				\ 'repetition',
-				\ 'invalid appointment',
+				\ 'invalid date',
 				\ ]
 	let selections_dialog = [
 				\ '&all',
@@ -2080,15 +2076,15 @@ function! s:GrepTasks(where)
 				\ '&waiting',
 				\ '&block',
 				\ '&scheduled',
-				\ 'a&ppointment',
-				\ 'r&epetition',
-				\ '&invalid appointment',
+				\ 'dat&e',
+				\ 're&petition',
+				\ '&invalid date',
 				\ ]
 	
 	let input = confirm('Searching Tasks in '.shellescape(path_nicened).'', join(selections_dialog, "\n"))
 
-	if selections[input-1] ==# 'invalid appointment'
-		call s:GrepTasksWithInvalidAppointment(path)
+	if selections[input-1] ==# 'invalid date'
+		call s:GrepTasksWithInvalidDate(path)
 	else
 		call s:GrepTasksByStatus(selections[input-1], path)
 	endif
@@ -2140,8 +2136,8 @@ function! s:SetQfSyntax()
 	syntax match VimdoitString "\v[ \t]\zs['"].{-}['"]\ze[ \t,.!:\n]" contains=SingleSinglequote
 	highlight link VimdoitString String
 	" Time
-	syntax match Appointment "\v\{.{-}\}"
-	highlight link Appointment Constant
+	syntax match Date "\v\{.{-}\}"
+	highlight link Date Constant
 	" URLs
 	syntax match URL `\v<(((https?|ftp|gopher)://|(mailto|file|news):)[^' 	<>"]+|(www|web|w3)[a-z0-9_-]*\.[a-z0-9._-]+\.[^' 	<>"]+)[a-zA-Z0-9/]`
 	highlight link URL String
@@ -2172,10 +2168,10 @@ function! s:SetQfSyntax()
 	syntax region FlagRegion start="\v\s--\s" end="$" contains=Flag,FlagDelimiter,FlagBlock,FlagWaiting,FlagInProgress,FlagSprint,FlagTag,FlagID
 	highlight link FlagRegion NerdTreeDir
 	" Task Block
-	syntax match TaskBlock "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*\$\d+" contains=ExclamationMark,Info,Appointment
+	syntax match TaskBlock "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*\$\d+" contains=ExclamationMark,Info,Date
 	highlight link TaskBlock Orange
 	" Task Waiting
-	syntax match TaskWaiting "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*\~\d+" contains=ExclamationMark,Info,Appointment
+	syntax match TaskWaiting "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*\~\d+" contains=ExclamationMark,Info,Date
 	highlight link TaskWaiting String
 	" Task Done
 	syntax region TaskDone start="\v- \[x\]+" skip="\v^\t{1,}" end="^" contains=FlagID
@@ -2365,65 +2361,65 @@ function! s:FilterQuickfix()
 	elseif selections[input-1] ==# 'unique'
 		call sort(l:qf, function('s:CmpQfById'))
 		call uniq(l:qf, function('HasSameID'))
-		if g:vimdoit_quickfix_type ==# 'appointment'
+		if g:vimdoit_quickfix_type ==# 'date'
 			call sort(l:qf, function('s:CmpQfByDate'))
 		else
 			call sort(l:qf)
 		endif
 	elseif selections[input-1] ==# 'today*'
-		if g:vimdoit_quickfix_type ==# 'appointment'
+		if g:vimdoit_quickfix_type ==# 'date'
 			call filter(l:qf, function('Today'))
 		else
-			echoe "Quickfix List is not of type appointment."
+			echoe "Quickfix List is not of type date."
 			return
 		endif
 	elseif selections[input-1] ==# 'tomorrow*'
-		if g:vimdoit_quickfix_type ==# 'appointment'
+		if g:vimdoit_quickfix_type ==# 'date'
 			call filter(l:qf, function('Tomorrow'))
 		else
-			echoe "Quickfix List is not of type appointment."
+			echoe "Quickfix List is not of type date."
 			return
 		endif
 	elseif selections[input-1] ==# 'this week*'
-		if g:vimdoit_quickfix_type ==# 'appointment'
+		if g:vimdoit_quickfix_type ==# 'date'
 			call filter(l:qf, function('ThisWeek'))
 		else
-			echoe "Quickfix List is not of type appointment."
+			echoe "Quickfix List is not of type date."
 			return
 		endif
 	elseif selections[input-1] ==# 'next week*'
-		if g:vimdoit_quickfix_type ==# 'appointment'
+		if g:vimdoit_quickfix_type ==# 'date'
 			call filter(l:qf, function('NextWeek'))
 		else
-			echoe "Quickfix List is not of type appointment."
+			echoe "Quickfix List is not of type date."
 			return
 		endif
 	elseif selections[input-1] ==# 'this month*'
-		if g:vimdoit_quickfix_type ==# 'appointment'
+		if g:vimdoit_quickfix_type ==# 'date'
 			call filter(l:qf, function('ThisMonth'))
 		else
-			echoe "Quickfix List is not of type appointment."
+			echoe "Quickfix List is not of type date."
 			return
 		endif
 	elseif selections[input-1] ==# 'upcoming*'
-		if g:vimdoit_quickfix_type ==# 'appointment'
+		if g:vimdoit_quickfix_type ==# 'date'
 			call filter(l:qf, function('Upcoming'))
 		else
-			echoe "Quickfix List is not of type appointment."
+			echoe "Quickfix List is not of type date."
 			return
 		endif
 	elseif selections[input-1] ==# 'past*'
-		if g:vimdoit_quickfix_type ==# 'appointment'
+		if g:vimdoit_quickfix_type ==# 'date'
 			call filter(l:qf, function('Past'))
 		else
-			echoe "Quickfix List is not of type appointment."
+			echoe "Quickfix List is not of type date."
 			return
 		endif
 	elseif selections[input-1] ==# 'nicen'
-		if g:vimdoit_quickfix_type ==# 'appointment'
+		if g:vimdoit_quickfix_type ==# 'date'
 			call s:NicenQfByDate(l:qf)
 		else
-			echoe "Quickfix List is not of type appointment."
+			echoe "Quickfix List is not of type date."
 			return
 		endif
 	elseif selections[input-1] ==# 'syntax'
@@ -2438,8 +2434,8 @@ endfunction
 
 function! s:JumpToToday()
 
-	if g:vimdoit_quickfix_type !=# 'appointment'
-		echoe "Quickfix List is not of type appointment."
+	if g:vimdoit_quickfix_type !=# 'date'
+		echoe "Quickfix List is not of type date."
 		return
 	endif
 	
@@ -2635,7 +2631,7 @@ endfunction
 
 function! s:IsInQfList(needle, haystack)
 	for i in a:haystack
-		let date = s:ExtractDate(i.text)
+		let date = s:ExtractDate(i.text)['date']
 		if a:needle ==# date
 			return v:true
 		endif
@@ -2727,11 +2723,11 @@ function! s:GenerateDatesFromRepetition(task)
 
 		if rep['operator'] ==# 'd'
 			let limit = trim(system('dateadd '.shellescape(today).' +3mo'))
-		elseif operator ==# 'w'
+		elseif rep['operator'] ==# 'w'
 			let limit = trim(system('dateadd '.shellescape(today).' +6mo'))
-		elseif operator ==# 'mo'
+		elseif rep['operator'] ==# 'mo'
 			let limit = trim(system('dateadd '.shellescape(today).' +2y'))
-		elseif operator ==# 'y'
+		elseif rep['operator'] ==# 'y'
 			let limit = trim(system('dateadd '.shellescape(today).' +30y'))
 		else
 			let limit = trim(system('dateadd '.shellescape(today).' +3mo'))
@@ -2795,24 +2791,24 @@ function! s:CompileTaskString(task)
 		let str = str.' '.exclamations
 	endif
 
-	" appointment
-	if empty(t['appointment']) == v:false
-		let ap = t['appointment']
+	" date
+	if empty(t['date']) == v:false
+		let date = t['date']
 		let time = '{'
 		
 		" weekday
-		if ap['weekday'] != -1
-			let dayofweek = trim(system('date +%a --date='.ap['date']))
+		if date['weekday'] != -1
+			let dayofweek = trim(system('date +%a --date='.date['date']))
 			let time = time.dayofweek.": "
 		endif
 
 		" date
-		if ap['date'] != -1
-			let time = time.ap['date']
+		if date['date'] != -1
+			let time = time.date['date']
 		endif
 		" time
-		if ap['time'] != -1
-			let time = time.' '.ap['time']
+		if date['time'] != -1
+			let time = time.' '.date['time']
 		endif
 
 		let time = time.'}'
@@ -2847,13 +2843,15 @@ function! s:CompileTaskString(task)
 endfunction
 
 function! s:ExtendLineWithTask(t1, dates)
+	" skip if datefile
+	if s:IsDateFile() == v:true | return | endif
 	let line = getline('.')
 	" check if date is in datelist
 	let t2       = s:ExtractTaskData(line)
 	let datetime = {}
 	let idx      = 0
 	while idx < len(a:dates)
-		if a:dates[idx]['date'] ==# t2['appointment']['date']
+		if a:dates[idx]['date'] ==# t2['date']['date']
 			let datetime = a:dates[idx]
 			call add(s:used_dates, a:dates[idx])
 			call add(s:used_ids, t2['id'])
@@ -2867,7 +2865,7 @@ function! s:ExtendLineWithTask(t1, dates)
 	endif
 	" extend & set
 	let tnew = s:ExtendTask(t2, a:t1)
-	let tnew['appointment']['time'] = datetime['time']
+	let tnew['date']['time'] = datetime['time']
 	let str = s:CompileTaskString(tnew)
 	call setline('.', str)
 endfunction
@@ -2876,8 +2874,8 @@ function! s:UpdateDateReferences(task, dates)
 	" get list of all listed buffers
 	let buffers = getbufinfo({'buflisted':1})	 
 	" open all projects (no datefiles!)
-	" TODO this will blow up , when we opened vim with
-	" `.randomproject-dates.vdo`
+	" this will blow up, when we opened vim with `.randomproject-dates.vdo`
+	" WORKAROUND: check in `s:ExtendLineWithTask()`, if the file is a datefile
 	args ./**/*.vdo
 	" find all auto-generated tasks with same id
 	execute 'silent! argdo global/\v<0x'.a:task['id'].'(\|\d+)>/call s:ExtendLineWithTask(a:task, a:dates)'
@@ -2886,7 +2884,7 @@ endfunction
 function! s:UpdateDatefile(datefile, task, dates)
 	" delete all dates from datefile with same id as current repetition
 	execute 'edit! '.a:datefile
-	execute 'global/\v0x'.a:task['id'].'/delete'
+	execute 'silent! global/\v0x'.a:task['id'].'/delete'
 	
 	" insert all not already existing dates into to datefile
 	call sort(map(s:used_ids, "substitute(v:val, '.*\|', '', '')"))
@@ -2897,10 +2895,10 @@ function! s:UpdateDatefile(datefile, task, dates)
 			continue
 		endif
 		
-		let new                = deepcopy(a:task)
-		let new['id']          = a:task['id'].'|'.sid
-		let new['appointment'] = { 'date': d['date'], 'weekday': -1, 'time': d['time']}
-		let str                = s:CompileTaskString(new)
+		let new         = deepcopy(a:task)
+		let new['id']   = a:task['id'].'|'.sid
+		let new['date'] = { 'date': d['date'], 'weekday': -1, 'time': d['time']}
+		let str         = s:CompileTaskString(new)
 		call append(line('$'), str)
 		
 		let sid = sid + 1
@@ -2934,7 +2932,7 @@ function! s:CleanUpDatefile()
 	for id in ids
 		let occurences = s:GetNumOccurences('\v<0x'.id.'(\s|$)')
 		if occurences == 0
-			execute 'global/\v<0x'.id.'\|\d+(\s|$)/delete'
+			execute 'silent! global/\v<0x'.id.'\|\d+(\s|$)/delete'
 		endif
 	endfor
 
