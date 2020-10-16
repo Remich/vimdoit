@@ -46,6 +46,8 @@ endif
 " TODO check if s: works also
 let g:vimdoit_quickfix_type = 'none'
 let s:changedlines  = []
+let s:syntax_errors = []
+let s:parse_runtype = 'single'
 
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 "																Utility Functions													 "
@@ -1346,6 +1348,18 @@ function! s:ErrorLine(linenum)
 	highlight link VdoError Error
 endfunction
 
+function! s:SyntaxError(linenum, msg)
+	let entry = {
+				\'bufnr': bufnr(),
+				\'filename': expand('%'),
+				\'lnum': a:linenum,
+				\'text': a:msg,
+				\'type': 'E'
+				\}
+	call s:ErrorLine(a:linenum)
+	call add(s:syntax_errors, entry)
+endfunction
+
 " TODO implement syntax check of other attributes
 " currently implemented:
 " - [x] check: only one date attribute per task/note
@@ -1369,12 +1383,10 @@ function! s:CheckSyntax(line, linenum)
 	
 	" check if the task has multiple date-attributes (`{...}´)
 	if len(date_attributes) > 1
-		call s:ErrorLine(a:linenum)
-		echoe "Task/Note has multiple dates: ".a:line
+		call s:SyntaxError(a:linenum, "Multiple dates.")
 		return
 	" check if task has a date or repetition
 	elseif len(date_attributes) == 1
-
 		let pass = v:false
 		
 		" remove task/note indicator
@@ -1383,11 +1395,9 @@ function! s:CheckSyntax(line, linenum)
 		" check for any characters except `!` before the date-attribute
 		" remove all `!` and spaces before date-attribute
 		let line3 = substitute(line2, '\v(!|\s)', '', 'g')
-		echom line3
 		" check
 		if line3 =~# '\v^\zs.+\ze\{.*\}'
-			call s:ErrorLine(a:linenum)
-			echoe "Forbidden characters (allowed: ! and whitespaces) found before the date-attribute: ".a:line
+			call s:SyntaxError(a:linenum, "Forbidden characters before the date-attribute. Allowed characters: ! and whitespaces.")
 			return
 		endif
 
@@ -1401,106 +1411,111 @@ function! s:CheckSyntax(line, linenum)
 		endif
 
 		if pass == v:false
-			call s:ErrorLine(a:linenum)
-			echoe "Task has an invalid date or repetition: ".a:line
+			call s:SyntaxError(a:linenum, 'Invalid date or repetition.' )
 			return
 		endif
 	endif
 
-	" remove highlights
-	highlight link VdoError None
-
 endfunction
 
-" Iterates over every line of the file exactly once!
-command! ParseFile :call s:ParseProjectFile()
-function! s:ParseProjectFile()
+" use like: `bufdo ParseFile`
+command! ParseFile :call s:ParseFileGlobal()
+" this function should only be called from the user-command ParseFile
+function! s:ParseFileGlobal()
+	call s:ParseFile()
+	if len(s:syntax_errors) > 0
+		call setqflist(s:syntax_errors, 'a')
+		echoerr "Syntax errors in ".expand('%').". See error list."
+	endif
+endfunction
 
+function! s:ParseFile()
+
+	let s:syntax_errors = []
 	echom "Parsing file ".expand('%')
 
 	call s:SaveLocation()
 	call s:DataInit()
 	
-		let l:cur_line_num   = 0
-		let l:total_line_num = line('$')
+	let l:cur_line_num   = 0
+	let l:total_line_num = line('$')
 
-		" some flags
-		let l:is_line_section_heading    = v:false
-		let l:is_line_subsection_heading = v:false
-		
-		let l:i = 1
-		while l:i <= l:total_line_num
+	" some flags
+	let l:is_line_section_heading    = v:false
+	let l:is_line_subsection_heading = v:false
+	
+	let l:i = 1
+	while l:i <= l:total_line_num
 
-			let l:line = getline(l:i)
+		let l:line = getline(l:i)
 
-			" skip empty lines
-			if s:IsLineEmpty(l:line) == v:true
-				let l:i += 1
-				continue
-			endif
-
-			" is this the first line?
-			if l:i == 1
-				let l:project_name  = s:ExtractProjectName(l:i)
-				let l:project_flags = s:ExtractProjectFlags(l:i)
-				call s:DataSetProject(l:project_name, l:project_flags)
-				
-				let l:i += 1
-				continue
-			endif
-
-			" is line a Section Delimiter?
-			if s:IsLineSectionDelimiter(l:line) == v:true
-				" yes: then next line contains the Section Heading
-				let l:section_name  = s:ExtractSectionHeading(getline(l:i+1))
-				let l:section_level = 1
-				let l:flags         = s:ExtractSectionHeadingFlags(getline(l:i+1))
-				call s:DataAddSection(l:section_name, l:i, section_level, l:flags)
-				
-				let l:i += 2
-				continue
-			endif
-			
-			" is line a Subsection Delimiter?
-			if s:IsLineSubsectionDelimiter(l:line) == v:true
-				" yes: then next line contains the Section Heading
-				let l:section_name  = s:ExtractSectionHeading(getline(l:i+1))
-				let l:section_level = 2 + s:ExtractSectionLevel(getline(l:i+1))
-				let l:flags         = s:ExtractSectionHeadingFlags(getline(l:i+1))
-				call s:DataAddSection(l:section_name, l:i, section_level, flags)
-				
-				let l:i += 2
-				continue
-			endif
-			
-			" is line a Task?	
-			if s:IsLineTask(l:line) == v:true
-				call s:CheckSyntax(l:line, l:i)
-				let l:task = s:ExtractTaskData(l:line)
-				let l:task = extend(l:task, { 'linenum': l:i, 'line': l:line })
-				call s:DataAddTask(l:task)
-				let l:i += 1
-				continue
-			endif
-			
-			" is line a Note?	
-			if s:IsLineNote(l:line) == v:true
-				call s:CheckSyntax(l:line, l:i)
-				let l:note = s:ExtractNoteData(l:line)
-				let l:note = extend(l:note, { 'linenum': l:i })
-				call s:DataAddNote(l:note)
-				let l:i += 1
-				continue
-			endif
-
+		" skip empty lines
+		if s:IsLineEmpty(l:line) == v:true
 			let l:i += 1
-		endwhile
+			continue
+		endif
 
-		let l:last_section        = s:DataUpdateEndOfEachSection(s:project_tree["sections"])
-		let l:last_section['end'] = line('$')
+		" is this the first line?
+		if l:i == 1
+			let l:project_name  = s:ExtractProjectName(l:i)
+			let l:project_flags = s:ExtractProjectFlags(l:i)
+			call s:DataSetProject(l:project_name, l:project_flags)
+			
+			let l:i += 1
+			continue
+		endif
+
+		" is line a Section Delimiter?
+		if s:IsLineSectionDelimiter(l:line) == v:true
+			" yes: then next line contains the Section Heading
+			let l:section_name  = s:ExtractSectionHeading(getline(l:i+1))
+			let l:section_level = 1
+			let l:flags         = s:ExtractSectionHeadingFlags(getline(l:i+1))
+			call s:DataAddSection(l:section_name, l:i, section_level, l:flags)
+			
+			let l:i += 2
+			continue
+		endif
+		
+		" is line a Subsection Delimiter?
+		if s:IsLineSubsectionDelimiter(l:line) == v:true
+			" yes: then next line contains the Section Heading
+			let l:section_name  = s:ExtractSectionHeading(getline(l:i+1))
+			let l:section_level = 2 + s:ExtractSectionLevel(getline(l:i+1))
+			let l:flags         = s:ExtractSectionHeadingFlags(getline(l:i+1))
+			call s:DataAddSection(l:section_name, l:i, section_level, flags)
+			
+			let l:i += 2
+			continue
+		endif
+		
+		" is line a Task?	
+		if s:IsLineTask(l:line) == v:true
+			call s:CheckSyntax(l:line, l:i)
+			let l:task = s:ExtractTaskData(l:line)
+			let l:task = extend(l:task, { 'linenum': l:i, 'line': l:line })
+			call s:DataAddTask(l:task)
+			let l:i += 1
+			continue
+		endif
+		
+		" is line a Note?	
+		if s:IsLineNote(l:line) == v:true
+			call s:CheckSyntax(l:line, l:i)
+			let l:note = s:ExtractNoteData(l:line)
+			let l:note = extend(l:note, { 'linenum': l:i })
+			call s:DataAddNote(l:note)
+			let l:i += 1
+			continue
+		endif
+
+		let l:i += 1
+	endwhile
+
+	let l:last_section        = s:DataUpdateEndOfEachSection(s:project_tree["sections"])
+	let l:last_section['end'] = line('$')
 
 	call s:RestoreLocation()
-
 endfunction
 
 function! s:NavParsingEnd()
@@ -1518,19 +1533,28 @@ function! s:AfterProjectChange()
 	if s:IsDateFile() == v:true | return | endif
 
 	try
-		call s:ParseProjectFile()
-		call s:DataUpdateReferences()
-		call s:UpdateDates()
-		" call s:CleanUpDatefile()
-		call s:UpdateFirstLineOfDateFile()
-		call s:ParseProjectFile() " yes again
-		call s:DataComputeProgress()
-		call s:DrawSectionOverview()
-		call s:DrawProjectStatistics()
-		" call s:DataSaveJSON()
+		call s:ParseFile()
+		if len(s:syntax_errors) > 0
+			call setqflist(s:syntax_errors)
+			echoerr "Syntax errors found! See error list! Abort write!"
+		else
+			" remove error highlights
+			highlight link VdoError None
+		endif
 	catch
 		echoerr v:exception.' in '.v:throwpoint
+		return
 	endtry
+	
+	call s:DataUpdateReferences()
+	call s:UpdateDates()
+	" call s:CleanUpDatefile()
+	call s:UpdateFirstLineOfDateFile()
+	call s:ParseFile() " yes again
+	call s:DataComputeProgress()
+	call s:DrawSectionOverview()
+	call s:DrawProjectStatistics()
+	" call s:DataSaveJSON()
 	
 endfunction
 
