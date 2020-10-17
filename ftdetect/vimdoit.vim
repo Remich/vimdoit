@@ -1,1 +1,1 @@
-autocmd BufNewFile,BufRead *.vdo set filetype=vimdoit
+autocmd BufNewFile,BufRead,BufEnter *.vdo set filetype=vimdoit

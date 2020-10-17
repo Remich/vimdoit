@@ -1541,7 +1541,9 @@ function! s:IsDateFile()
 	return basename =~# '\v\..*-date'
 endfunction
 
-function! s:BeforeProjectWrite()
+function! s:ProjectWritePre()
+
+	call s:UpdateBufferlist()
 
 	" skip if datefile
 	if s:IsDateFile() == v:true | return | endif
@@ -3070,6 +3072,23 @@ function! s:UpdateDates()
 	call s:RestoreLocation()
 endfunction
 
+" when running `mv`, `rm`, `cp`, etc. we have to make sure that the bufferlist is up to date
+function! s:UpdateBufferlist()
+	" unload buffers where the corresponding file doesn't exist anymore
+	let buffers = getbufinfo({'buflisted':1})	 
+	for b in buffers
+		if filereadable(bufname(b['bufnr'])) == v:false
+			echom "wiping buffer :".bufname(b['bufnr'])
+			execute "bwipeout!".b['bufnr']
+		endif
+	endfor
+	
+	" load files which are not existing
+	call s:SaveLocation()
+	execute 'args '.g:vimdoit_projectsdir.'/**/*.vdo '.g:vimdoit_projectsdir.'/**/.*.vdo'
+	call s:RestoreLocation()
+endfunction
+
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 "                               Mappings                                "
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -3111,7 +3130,8 @@ augroup VimDoit
 	" TODO maybe this won't be necessary anymore, after we switched to using
 	" `global
 	autocmd BufEnter *.vdo setlocal noswapfile
-	autocmd BufWritePre *.vdo call s:BeforeProjectWrite()
+	autocmd BufWritePre *.vdo call s:ProjectWritePre()
+	autocmd ShellCmdPost * call s:UpdateBufferlist()
 augroup END
 
 " open all files
