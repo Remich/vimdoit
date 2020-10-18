@@ -23,8 +23,13 @@ if exists("g:vimdoit_projectsdir") == v:false
 	finish
 endif
 
+" check user option for enabling undo/redo
+if exists("g:vimdoit_undo_enable") == v:false
+	let g:vimdoit_undo_enable = v:true
+endif
+
 " check if necessary tools are installed
-let s:tools = ['diff', 'date', 'dateadd', 'dround', 'grep', 'git' ]
+let s:tools = ['diff', 'date', 'dateadd', 'dround', 'grep', 'git', 'sed' ]
 
 for t in s:tools
 	if trim(system("whereis ".t)) ==# t.":"
@@ -43,13 +48,12 @@ endif
 "																Global Variables												   "
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
-" TODO check if s: works also
-let g:vimdoit_quickfix_type = 'none'
-let s:changedlines          = []
-let s:syntax_errors         = []
-let s:parse_runtype         = 'single'
-let s:undo_enable						= v:false
-let s:undo_event						= v:false
+let s:quickfix_type = 'none'
+let s:changedlines  = []
+let s:syntax_errors = []
+let s:parse_runtype = 'single'
+let s:undo_enable   = v:false
+let s:undo_event    = v:false
 
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 "																Utility Functions													 "
@@ -706,7 +710,7 @@ function! s:GetNumOccurences(pat)
 	let l:save_a = @a
 	" clear register a
 	let @a = ''
-	" find ids
+	" find occurences
 	execute 'silent! bufdo global/'.a:pat.'/yank A'
 	" save  result
 	let l:res = @a
@@ -714,7 +718,7 @@ function! s:GetNumOccurences(pat)
 	let @a = l:save_a
 	" restore location
 	call s:RestoreLocation()
-	" return found occurences
+	" return found occurrences
 	return len(split(l:res, '\n'))
 endfunction
 
@@ -1616,7 +1620,7 @@ function! s:SortQuickfix()
 		echom "Sorting by Date"
 		let title = s:ModifyQfTitle(title, 'add', 'sort', 'date')
 	elseif selections[input-1] ==# 'due date (only projects)'
-		if g:vimdoit_quickfix_type ==# 'project'
+		if s:quickfix_type ==# 'project'
 			call sort(l:qf, 's:CmpQfByDueDate')
 			echom "Sorting by Due Date (Only Projects)"
 			let title = s:ModifyQfTitle(title, 'add', 'sort', 'due date')
@@ -1625,7 +1629,7 @@ function! s:SortQuickfix()
 			return
 		endif
 	elseif selections[input-1] ==# 'start date (only projects)'
-		if g:vimdoit_quickfix_type ==# 'project'
+		if s:quickfix_type ==# 'project'
 			call sort(l:qf, 's:CmpQfByStartDate')
 			echom "Sorting by Start Date (Only Projects)"
 			let title = s:ModifyQfTitle(title, 'add', 'sort', 'start date')
@@ -1634,7 +1638,7 @@ function! s:SortQuickfix()
 			return
 		endif
 	elseif selections[input-1] ==# 'completion date (only projects)'
-		if g:vimdoit_quickfix_type ==# 'project'
+		if s:quickfix_type ==# 'project'
 			call sort(l:qf, 's:CmpQfByCompletionDate')
 			echom "Sorting by Completion Date (Only Projects)"
 			let title = s:ModifyQfTitle(title, 'add', 'sort', 'completion date')
@@ -1787,7 +1791,7 @@ function! s:GrepProjectsByTag(tag, path)
 	call sort(l:qf, 's:CmpQfByPriority')
 	let title = s:ModifyQfTitle(title, 'add', 'sort', 'priority')
 	call setqflist(l:qf, 'r')	
-	let g:vimdoit_quickfix_type = 'project'
+	let s:quickfix_type = 'project'
 	call s:SetQfSyntax()
 
 	call vimdoit_utility#RestoreOptions()
@@ -1996,12 +2000,12 @@ function! s:GrepTasksByStatus(status, path)
 		" sort by date
 		call sort(l:qf, 's:CmpQfByDate')
 		let title = s:ModifyQfTitle(title, 'add', 'sort', 'date')
-		let g:vimdoit_quickfix_type = 'date'
+		let s:quickfix_type = 'date'
 	else
 		" sort by priority
 		call sort(l:qf, 's:CmpQfByPriority')
 		let title = s:ModifyQfTitle(title, 'add', 'sort', 'priority')
-		let g:vimdoit_quickfix_type = 'task'
+		let s:quickfix_type = 'task'
 	endif
 	
 	" push list
@@ -2379,62 +2383,62 @@ function! s:FilterQuickfix()
 	elseif selections[input-1] ==# 'unique'
 		call sort(l:qf, function('s:CmpQfById'))
 		call uniq(l:qf, function('HasSameID'))
-		if g:vimdoit_quickfix_type ==# 'date'
+		if s:quickfix_type ==# 'date'
 			call sort(l:qf, function('s:CmpQfByDate'))
 		else
 			call sort(l:qf)
 		endif
 	elseif selections[input-1] ==# 'today*'
-		if g:vimdoit_quickfix_type ==# 'date'
+		if s:quickfix_type ==# 'date'
 			call filter(l:qf, function('Today'))
 		else
 			echoe "Quickfix List is not of type date."
 			return
 		endif
 	elseif selections[input-1] ==# 'tomorrow*'
-		if g:vimdoit_quickfix_type ==# 'date'
+		if s:quickfix_type ==# 'date'
 			call filter(l:qf, function('Tomorrow'))
 		else
 			echoe "Quickfix List is not of type date."
 			return
 		endif
 	elseif selections[input-1] ==# 'this week*'
-		if g:vimdoit_quickfix_type ==# 'date'
+		if s:quickfix_type ==# 'date'
 			call filter(l:qf, function('ThisWeek'))
 		else
 			echoe "Quickfix List is not of type date."
 			return
 		endif
 	elseif selections[input-1] ==# 'next week*'
-		if g:vimdoit_quickfix_type ==# 'date'
+		if s:quickfix_type ==# 'date'
 			call filter(l:qf, function('NextWeek'))
 		else
 			echoe "Quickfix List is not of type date."
 			return
 		endif
 	elseif selections[input-1] ==# 'this month*'
-		if g:vimdoit_quickfix_type ==# 'date'
+		if s:quickfix_type ==# 'date'
 			call filter(l:qf, function('ThisMonth'))
 		else
 			echoe "Quickfix List is not of type date."
 			return
 		endif
 	elseif selections[input-1] ==# 'upcoming*'
-		if g:vimdoit_quickfix_type ==# 'date'
+		if s:quickfix_type ==# 'date'
 			call filter(l:qf, function('Upcoming'))
 		else
 			echoe "Quickfix List is not of type date."
 			return
 		endif
 	elseif selections[input-1] ==# 'past*'
-		if g:vimdoit_quickfix_type ==# 'date'
+		if s:quickfix_type ==# 'date'
 			call filter(l:qf, function('Past'))
 		else
 			echoe "Quickfix List is not of type date."
 			return
 		endif
 	elseif selections[input-1] ==# 'nicen'
-		if g:vimdoit_quickfix_type ==# 'date'
+		if s:quickfix_type ==# 'date'
 			call s:NicenQfByDate(l:qf)
 		else
 			echoe "Quickfix List is not of type date."
@@ -2452,7 +2456,7 @@ endfunction
 
 function! s:JumpToToday()
 
-	if g:vimdoit_quickfix_type !=# 'date'
+	if s:quickfix_type !=# 'date'
 		echoe "Quickfix List is not of type date."
 		return
 	endif
@@ -3194,8 +3198,50 @@ function! s:UpdateDatefile(datefile, task, dates)
 	endfor
 endfunction
 
+function! s:DeleteFromDatefile(id)
+	
+	" skip if there is not a datefile
+	if filereadable(s:GetDatefileName()) == v:false
+		return
+	endif
+
+	" save location
+	call s:SaveLocation()
+	" edit datefile
+	execute "edit! ".s:GetDatefileName()
+	" deletion
+	execute 'silent! global/\v<0x'.a:id.'\|\d+(\s|$)/delete'
+	" restore location
+	call s:RestoreLocation()
+endfunction
+
+" deletes all parent-less auto-generated dates with `id`
+function! s:CheckDeletionFromDatefile(id)
+	
+	" skip if there is not a datefile
+	if filereadable(s:GetDatefileName()) == v:false
+		return
+	endif
+
+	" save location
+	call s:SaveLocation()
+	" edit datefile
+	execute "edit! ".s:GetDatefileName()
+	
+	if s:GetNumOccurences('\v<0x'.a:id.'>(\s|$)') == 0
+		" note: the following pattern is ok and won't delete tasks in regular files,
+		" because we are not using `bufdo global`
+		execute 'silent! global/\v<0x'.a:id.'\|\d+(\s|$)/delete'
+	endif
+	
+	" restore location
+	call s:RestoreLocation()
+endfunction
+
+" remove all auto-generated dates where there is no parent anymore
 function! s:CleanUpDatefile()
 	echom "Cleaning datefile of file ".expand('%')
+	
 	" skip if datefile
 	if s:IsDateFile() == v:true | return | endif
 
@@ -3206,15 +3252,13 @@ function! s:CleanUpDatefile()
 
 	" save location
 	call s:SaveLocation()
+	" edit datefile
+	execute "edit! ".s:GetDatefileName()
 	
-	let datefile = s:GetDatefileName()
-	execute "edit! ".datefile
-	
-	" remove all auto-generated dates where there is no parent anymore
+	" get list of ids
 	let cur   = 2 " first line only has tags
 	let total = line('$')
-
-	let ids = []
+	let ids   = []
 	while cur <= total
 		let baseid = s:ExtractFromString(getline(cur), {'baseid':1})['baseid']
 		call add(ids, baseid)
@@ -3225,8 +3269,7 @@ function! s:CleanUpDatefile()
 
 	for id in ids
 		" only base ids
-		let occurences = s:GetNumOccurences('\v<0x'.id.'>(\s|$)')
-		if occurences == 0
+		if s:GetNumOccurences('\v<0x'.id.'>(\s|$)') == 0
 			" note: the following pattern is ok and won't delete tasks in regular files,
 			" because we are not using `bufdo global`
 			execute 'silent! global/\v<0x'.id.'\|\d+(\s|$)/delete'
@@ -3321,6 +3364,15 @@ function! s:GetDiff()
 	endfor
 
 	return dif
+endfunction
+
+function! s:GetLinesOfDiskfile(lines)
+	echom "Reading lines from file from disk"
+	let read = []
+	for i in a:lines
+		call add(read, {'lnum': i, 'line': trim(system('sed -n '.i.'p '.expand('%')))})
+	endfor
+	return read
 endfunction
 
 function! s:ValidateSyntax(lines)
@@ -3447,17 +3499,48 @@ function! s:TextChanged()
 		endif
 		
 		if len(changes['deletions']) > 0
+			let deleted = s:GetLinesOfDiskfile(changes['deletions'])
 			call s:ValidateDeletions(changes['deletions'])
 		endif
 		
 		if len(changes['changes']) > 0
+			let changed = s:GetLinesOfDiskfile(changes['changes'])
 			call s:ValidateChanges(changes['changes'])
 		endif
 		
-		if len(changes['deletions']) > 0 || len(changes['changes']) > 0
-			call s:CleanUpDatefile()
+		" check if deleted lines have a repetition, update datefile accordingly
+		if len(changes['deletions']) > 0 
+			" get deleted lines
+			for line in deleted
+				" check if the deleted line has a repetition
+				let rep = s:ExtractRepetition(line['line'])
+				if empty(rep) == v:false
+					" yes, check auto-generated dates for deletion
+					call s:CheckDeletionFromDatefile(s:ExtractId(line['line']))
+				endif
+			endfor
 		endif
 		
+		" check if changed lines had a repetition before the change,
+		" update datefile accordingly
+		if len(changes['changes']) > 0
+			for line in changed
+				" check if the changed line does still have a repetition
+				let rep_1 = s:ExtractRepetition(getline(line['lnum']))
+				if empty(rep_1) == v:false
+					echom "skipping because current line still has a repetition."
+					" yes
+					continue
+				endif
+				" check if the old line has a repetition
+				let rep_2 = s:ExtractRepetition(line['line'])
+				if empty(rep_2) == v:false
+					" yes, delete
+					call s:DeleteFromDatefile(s:ExtractId(line['line']))
+				endif
+			endfor
+		endif
+
 		call s:UpdateFirstLineOfDateFile()
 		" call s:ParseFile()
 		" call s:DataComputeProgress()
@@ -3466,7 +3549,7 @@ function! s:TextChanged()
 		silent update
 		echom "Writing file. Done."
 		
-		if s:undo_enable == v:true
+		if s:undo_enable == v:true && g:vimdoit_undo_enable == v:true
 			call s:Commit()
 		endif
 		
@@ -3491,9 +3574,13 @@ endfunction
 
 let s:git_commits = []
 let s:git_undo    = []
-let s:git_master  = 'master' " main branch to use
+let s:git_master  = 'dev' " main branch to use
 
 function! s:InitUndo()
+
+	if g:vimdoit_undo_enable == v:false
+		return
+	endif
 	
 	let cur = s:GetCurrentBranch()
 	
@@ -3613,6 +3700,8 @@ command! -nargs=0 VdoStack	:call s:PrintStacks()
 
 " init
 call s:InitUndo()
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 "                               Mappings                                "
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
