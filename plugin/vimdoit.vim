@@ -2515,7 +2515,6 @@ function! s:AddTaskBlocking(lines)
 	endfor
 endfunction
 
-
 function! s:AddTaskWaiting(lines)
 	for lnum in a:lines
 		let line = getline(lnum)
@@ -3673,6 +3672,7 @@ augroup END
 
 " open all files
 execute 'argadd '.g:vimdoit_projectsdir.'/**/*.vdo '.g:vimdoit_projectsdir.'/**/.*.vdo'
+" argadd ./inbox.vdo
 
 " Restore user's options.
 let &cpo = s:save_cpo
