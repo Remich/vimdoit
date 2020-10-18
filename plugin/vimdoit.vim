@@ -89,6 +89,7 @@ function! s:RestoreLocation()
 	execute "cd ".loc['cwd']
 	execute "buffer ".loc['buffer']
 	call setpos('.', loc['cursor'])
+	normal! zz
 	call remove(s:location_stack, -1)
 endfunction
 
@@ -653,23 +654,6 @@ function! s:DataUpdateReferencesLocalRef(ref)
 	" add reference to section in `s:project_tree`
 endfunction
 
-function! s:DataAppendFlagDelimiter(linenum)
-	let l:line = getline(a:linenum)
-	call setline(a:linenum, l:line.' --')
-endfunction
-
-function! s:DataAddFlag(flag, linenum)
-	" is there are delimiter?
-	if s:HasLineFlagDelimiter(getline(a:linenum)) == v:false
-		" append delimiter
-		call s:DataAppendFlagDelimiter(a:linenum)
-	endif
-	
-	" append flag
-	let l:line = getline(a:linenum)
-	call setline(a:linenum, l:line.' '.a:flag)
-endfunction
-
 function! s:GenerateID(len)
 	return trim(system('date "+%s%N" | sha256sum'))[0:a:len-1]
 endfunction
@@ -706,48 +690,6 @@ function! s:NewID()
 endfunction
 
 command! -nargs=? NewID	:call s:NewID()
-
-function! s:DataAddID(ref)
-
-	" `a:ref` is a section, therefore it has no `linenum` but `start` and `end`
-	if has_key(a:ref, 'start')
-		let l:linenum = a:ref['start'] + 1
-	else
-		let l:linenum = a:ref['linenum']
-	endif
-	
-	let l:id				= s:NewID()
-	let a:ref['id'] = l:id
-	let l:id				= '0x'.l:id
-
-	" actual adding of ID
-	call s:DataAddFlag(l:id, l:linenum)
-endfunction
-
-function! s:DataHasID(ref)
-	if a:ref['id'] != -1
-		return v:true
-	else
-		return v:false
-	endif
-endfunction
-
-function! s:DataCheckIDs()
-
-	" get all tasks
-	let l:tasks = { 'items' : [] }
-	call s:DataGetAllTasksAndNotes(s:project_tree, l:tasks)
-	
-	" decide what to do
-	for item in l:tasks['items']
-		" has the task/section of the reference already an ID?
-		if s:DataHasID(item) == v:false
-			" no: create it
-			call s:DataAddID(item)
-		endif
-	endfor
-	
-endfunction
 
 function! s:ReplaceLineWithTask(task, lnum)
 	" change the level accordingly
@@ -875,14 +817,6 @@ endfunction
 function! s:IsLineNote(line)
 	let l:pattern = '\v^\s*-\s[^[].[^]].*$'
 	return a:line =~# l:pattern
-endfunction
-
-function! s:HasLineFlagDelimiter(line)
-	if a:line =~# '\v\s--(\s|$)'
-		return v:true
-	else
-		return v:false
-	endif
 endfunction
 
 function! s:ExtractProjectName(line)
@@ -1051,6 +985,8 @@ endfunction
 function! s:IsTaskDone(task)
 	return a:task['status'] ==# 'done' ? v:true : v:false
 endfunction
+
+" TODO implement that everything inside `` is discarded 
 
 let s:pat_indendation = '\s*'
 let s:pat_note = s:pat_indendation.'-\s*'
@@ -2914,7 +2850,7 @@ endfunction
 
 function! s:CompileTaskString(task)
 	let str = ''
-	let t   = a:task
+	let t   = deepcopy(a:task)
 	let lut = {
 		\'done' : 'x',
 		\'todo' : ' ',
@@ -3079,7 +3015,8 @@ function! s:UpdateReferences(lines)
 		" escape id
 		let id = escape(task['id'], '|')
 		" updating of references
-		execute 'silent! bufdo global/\v<0x'.id.'(\s|$)>/call s:ReplaceLineWithTask(task, line("."))'
+		" both base and extended ids
+		execute 'silent! bufdo global/\v<0x'.id.'(\s|$)/call s:ReplaceLineWithTask(task, line("."))'
 	endfor
 	" save changed buffers
 	execute 'silent! bufdo update'
@@ -3249,8 +3186,11 @@ function! s:CleanUpDatefile()
 	call uniq(sort(ids))
 
 	for id in ids
-		let occurences = s:GetNumOccurences('\v<0x'.id.'(\s|$)')
+		" only base ids
+		let occurences = s:GetNumOccurences('\v<0x'.id.'>(\s|$)')
 		if occurences == 0
+			" note: the following pattern is ok and won't delete tasks in regular files,
+			" because we are not using `bufdo global`
 			execute 'silent! global/\v<0x'.id.'\|\d+(\s|$)/delete'
 		endif
 	endfor
@@ -3429,7 +3369,8 @@ function! s:TextChangedWrapper()
 	try
 		undojoin | call s:TextChanged()
 	catch /^Vim\%((\a\+)\)\=:E790/
-		" execute 'normal! g-' execute 'normal! g-'
+		" execute 'normal! g-'
+		" execute 'normal! g-'
 		undo 
 		undo
 		" call s:TextChanged()
