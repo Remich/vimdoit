@@ -45,13 +45,25 @@ endif
 
 " TODO check if s: works also
 let g:vimdoit_quickfix_type = 'none'
-let s:changedlines  = []
-let s:syntax_errors = []
-let s:parse_runtype = 'single'
+let s:changedlines          = []
+let s:syntax_errors         = []
+let s:parse_runtype         = 'single'
 
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 "																Utility Functions													 "
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+function! s:InList(haystack, needle)
+	for i in a:haystack
+		if a:needle ==# i | return v:true | endif
+	endfor | return v:false
+endfunction
+
+function! s:GetDatefileName()
+	let filepath = expand('%:h')
+	let filename = expand('%:t:r')
+	return filepath.'/.'.filename.'-dates.vdo'	
+endfunction
 
 function! s:SetGrep()
 	let g:vdo_grep_save = &grepprg
@@ -121,6 +133,24 @@ function! s:RestoreBuffers(buffers)
 	for buf in to_delete
 		execute 'silent bdelete '.buf.bufnr
 	endfor
+endfunction
+
+" afer running `mv`, `rm`, `cp`, etc. we have to make sure 
+" that the bufferlist is always up to date
+function! s:UpdateBufferlist()
+	" unload buffers where the corresponding file doesn't exist anymore
+	let buffers = getbufinfo({'buflisted':1})	 
+	for b in buffers
+		if filereadable(bufname(b['bufnr'])) == v:false
+			echom "wiping buffer :".bufname(b['bufnr'])
+			execute "bwipeout!".b['bufnr']
+		endif
+	endfor
+	
+	" load files which are not existing
+	call s:SaveLocation()
+	execute 'args '.g:vimdoit_projectsdir.'/**/*.vdo '.g:vimdoit_projectsdir.'/**/.*.vdo'
+	call s:RestoreLocation()
 endfunction
 
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -404,6 +434,7 @@ function! s:DataNewNote()
 		\ 'line'				: '',
 		\ 'id'					: -1,
 		\ 'level'				: 0,
+		\ 'status'			: -1,
 		\ 'text'				: 'BE: like water',
 		\ 'date'				: {},
 		\ 'repetition'	: {},
@@ -718,68 +749,10 @@ function! s:DataCheckIDs()
 	
 endfunction
 
-function! s:DataFindChanges()
-	
-	redir => l:changedlines
-	silent execute 'w !diff --unchanged-line-format="" --old-line-format="" --new-line-format=";\%dn" % -'
-	redir END
-	
-	let l:split = split(l:changedlines, '')
-	if len(l:split) == 0
-		let s:changedlines = []
-		return []
-	endif
-
-	let l:lines = split(l:split[0], ';')
-	
-	if l:lines[0] ==# 'shell'
-		let s:changedlines = []
-		return []
-	endif
-	
-	call map(l:lines, 'getline(v:val)')
-	let s:changedlines = l:lines
-	
-	return l:lines
-endfunction
-
-function! s:ReplaceLineWithTask(task)
+function! s:ReplaceLineWithTask(task, lnum)
 	" change the level accordingly
-	let a:task['level'] = s:ExtractFromString(getline('.'), {'level':1})['level']
-	call setline('.', s:CompileTaskString(a:task))
-endfunction
-
-function! s:DataUpdateReferences()
-	echom "Updating references of file ".expand('%')
-	" save location
-	call s:SaveLocation()
-	" make sure that all tasks/notes have an ID
-	call s:DataCheckIDs()
-	" get the changed lines
-	let l:changedlines = s:DataFindChanges()
-	" no changes, abort
-	if len(l:changedlines) == 0 | return | endif
-
-	" update references of changed lines, if there are any
-	for line in l:changedlines
-		" check if line is task or note
-		if s:IsLineTask(line) == v:false && s:IsLineNote(line) == v:false
-			continue
-		endif
-		" get data
-		let task = s:ExtractLineData(line)
-		" check if line has an id
-		if task['id'] == -1 | continue | endif
-		" escape id
-		let id = escape(task['id'], '|')
-		" updating of references
-		execute 'silent! bufdo global/\v<0x'.id.'(\s|$)>/call s:ReplaceLineWithTask(task)'
-	endfor
-
-	" save changed buffers
-	execute 'silent! bufdo update'
-	" restore original location
-	call s:RestoreLocation()
+	let a:task['level'] = s:ExtractFromString(getline(a:lnum), {'level':1})['level']
+	call setline(a:lnum, s:CompileTaskString(a:task))
 endfunction
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -896,24 +869,12 @@ endfunction
 " TODO use patterns defined in `s:pat_...`
 function! s:IsLineTask(line)
 	let l:pattern = '\v^\s*-\s\[.*\]\s.*$'
-	let l:result  = match(a:line, l:pattern)
-	
-	if l:result == -1
-		return v:false
-	else
-		return v:true
-	endif
+	return a:line =~# l:pattern
 endfunction
 
 function! s:IsLineNote(line)
-	let l:pattern = '\v^\s*-\s.*$'
-	let l:result  = match(a:line, l:pattern)
-	
-	if l:result == -1
-		return v:false
-	else
-		return v:true
-	endif
+	let l:pattern = '\v^\s*-\s[^[].[^]].*$'
+	return a:line =~# l:pattern
 endfunction
 
 function! s:HasLineFlagDelimiter(line)
@@ -1170,14 +1131,15 @@ function! s:ExtractStatus(line)
 endfunction
 
 function! s:ExtractText(line)
+	let text = a:line
 	" remove everything before text
-	let text = substitute(a:line, '\v'.s:pat_notetask, '', '')
+	let text = substitute(text, '\v'.s:pat_notetask, '', '')
 	" remove everything after text
 	let text = substitute(text, '\v\s*'.s:pat_flags.'*.*$', '', '')
-	" remove leading exclamation marks
-	let text = substitute(text, '\v^\s*!*\s', '', '')
+	" remove all exclamation marks
+	let text = substitute(text, '\v!', '', 'g')
 	" remove leading dates
-	let text = substitute(text, '\v^\{.{-}\}', '', '')
+	let text = substitute(text, '\v^\s*\{.{-}\}', '', '')
 	return trim(text)
 endfunction
 
@@ -1253,14 +1215,23 @@ endfunction
 function! s:ExtractBlocking(line)
 	let flags = s:ExtractFlags(a:line)
 	if len(flags) == 0
-		return []
+		return -1
 	else
 		let block = s:ExtractPatternFromString(flags[0], s:patterns['blocking'])	
-		return len(block) == 0 ? -1 : 1
+		return len(block) == 0 ? v:false : v:true
+	endif
 endfunction
 
 function! s:ExtractDateAttributes(line)
 	return s:ExtractPatternFromString(a:line, '\v\{.{-}\}')
+endfunction
+
+function! s:ExtractDiffInsertions(str)
+	return s:ExtractPatternFromString(a:str, '\v;\zs\d+\ze')
+endfunction
+
+function! s:ExtractDiffDeletions(str)
+	return s:ExtractPatternFromString(a:str, '\v:\zs\d+\ze')
 endfunction
 	
 function! s:ExtractFromString(str, ...)
@@ -1287,6 +1258,8 @@ function! s:ExtractFromString(str, ...)
 		\ { 'waiting': 's:ExtractWaiting(a:str)' },
 		\ { 'blocking': 's:ExtractBlocking(a:str)' },
 		\ { 'date-attributes': 's:ExtractDateAttributes(a:str)' },
+		\ { 'insertions': 's:ExtractDiffInsertions(a:str)' },
+		\ { 'deletions': 's:ExtractDiffDeletions(a:str)' },
 	\ ]
 	
 	let data = {}
@@ -1340,7 +1313,7 @@ function! s:ExtractNoteData(line)
 		\ 'waiting' : 1,
 		\ 'blocking' : 1,
 		\ })
-	let note = extend(s:DataNewTask(), data)
+	let note = extend(s:DataNewNote(), data)
 	return note
 endfunction
 
@@ -1375,6 +1348,56 @@ endfunction
 " - [ ] check for valid block
 " - [ ] check for valid id
 " - [ ] check for valid
+
+function! s:CheckSyntaxSingle(line, linenu)
+	
+	" remove everything between ``
+	let line = substitute(a:line, '\v`[^`]{-}`', '', 'g')
+
+	" check if task/note has a valid indicator (`- …` or `- [ ]`)
+	if line =~# '\v^\s*-\zs[^ -]\ze(\[.\])?'
+		return 'Invalid task/note indicator (`- …` or `- [ ]`). Maybe you used tabs instead of spaces?'
+	endif
+
+	" extract date attributes
+	let date_attributes = s:ExtractDateAttributes(line)
+	
+	" check if the task has multiple date-attributes (`{...}´)
+	if len(date_attributes) > 1
+		return "Multiple dates."
+	" check if task has a date or repetition
+	elseif len(date_attributes) == 1
+		let pass = v:false
+		
+		" remove task/note indicator
+		let line2 = substitute(line, '\v('.s:pat_task.'|'.s:pat_note.')', '', '')
+		
+		" check for any characters except `!` before the date-attribute
+		" remove all `!` and spaces before date-attribute
+		let line3 = substitute(line2, '\v(!|\s)', '', 'g')
+		" check
+		if line3 =~# '\v^\zs.+\ze\{.*\}'
+			return "Forbidden characters before the date-attribute. Allowed characters: ! and whitespaces."
+		endif
+
+		" check if it is a valid date
+		let date = date_attributes[0]
+		if date =~# '\v\{\zs('.s:pat_weekday.')?'.s:pat_datetime.'\ze\}'
+			let pass = v:true
+		" check if it is a valid repetition
+		elseif date =~# '\v^\{\zs'.s:pat_datetime.s:pat_rep.'(\|'.s:pat_datetime.')?\ze\}'
+			let pass = v:true
+		endif
+
+		if pass == v:false
+			return 'Invalid date or repetition.'
+		endif
+	endif
+
+	return ''
+
+endfunction
+
 function! s:CheckSyntax(line, linenum)
 	
 	" remove everything between ``
@@ -1539,39 +1562,6 @@ function! s:IsDateFile()
 	" check if this is a datefile
 	let basename = expand('%:t:r')
 	return basename =~# '\v\..*-date'
-endfunction
-
-function! s:ProjectWritePre()
-
-	call s:UpdateBufferlist()
-
-	" skip if datefile
-	if s:IsDateFile() == v:true | return | endif
-
-	try
-		call s:ParseFile()
-		if len(s:syntax_errors) > 0
-			call setqflist(s:syntax_errors)
-			echoerr "Syntax errors found! See error list! Abort write!"
-		else
-			" remove error highlights
-			highlight link VdoError None
-		endif
-	catch
-		echoerr v:exception.' in '.v:throwpoint
-		return
-	endtry
-	
-	call s:DataUpdateReferences()
-	call s:UpdateDates()
-	call s:CleanUpDatefile()
-	call s:UpdateFirstLineOfDateFile()
-	call s:ParseFile() " yes again
-	call s:DataComputeProgress()
-	call s:DrawSectionOverview()
-	call s:DrawProjectStatistics()
-	" call s:DataSaveJSON()
-	
 endfunction
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -2506,43 +2496,11 @@ endfunction
 "                           Modyifing Tasks                             "
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
-function! s:ModifyTaskStatus(state, lines)
-
-	if a:state ==# 'done'
-		let str = 'x'
-	elseif a:state ==# 'todo'
-		let str = ' '
-	elseif a:state ==# 'failed'
-		let str = 'F'
-	elseif a:state ==# 'cancelled'
-		let str = '-'
-	endif
-
-	for i in a:lines
-		execute i.'substitute/\v^\s*- \[\zs.\ze\]/'.str.'/'
-	endfor
-	
-endfunction
-
-function! s:ModifyTaskBlock(lines)
-	for i in a:lines
-		let line = getline(i)
-		" check if line is already a block?
-		if line =~# '\v--.*\zs \$block\ze'
-			" yes: remove block
-			execute i.'substitute/\v--.*\zs \$block\ze//'
-		else
-			" no: add block
-			call setline(i, line.' $block')
-		endif		
-	endfor
-endfunction
-
 function! s:PrependSelectionWithNumbers(selection)
 	let new = []
 	let num = 1
 	for i in a:selection
-		call add(new, num.' '.i)	
+		call add(new, '['.num.'] '.i)	
 		let num = num + 1
 	endfor
 	return new
@@ -2565,61 +2523,302 @@ function! s:ModifyTaskWaitingRemove(lines)
 	endfor
 endfunction
 
-function! s:ModifyTaskWaitingAdd(lines)
-	for i in a:lines
-		call setline(i, getline(i).' ~'.@+)
+function! s:AddTaskBlocking(lines)
+	for lnum in a:lines
+		let line = getline(lnum)
+		
+		" check if line is task or note
+		if s:IsLineNote(line) == v:false && s:IsLineTask(line) == v:false
+			echoerr "No line or task in line ".lnum
+			return
+		endif
+	
+		let task             = s:ExtractLineData(line)
+		let task['blocking'] = v:true
+		call s:ReplaceLineWithTask(task, lnum)
+	
 	endfor
 endfunction
 
-function! s:ModifyTaskToTask(lines)
-	for i in a:lines
-		execute i.'substitute/\v^\s*\zs- (\[.\])?\ze/- [ ] /'
+
+function! s:AddTaskWaiting(lines)
+	for lnum in a:lines
+		let line = getline(lnum)
+		
+		" check if line is task or note
+		if s:IsLineNote(line) == v:false && s:IsLineTask(line) == v:false
+			echoerr "No line or task in line ".lnum
+			return
+		endif
+	
+		let task = s:ExtractLineData(line)
+		call add(task['waiting'], @+)
+		call sort(task['waiting'])
+		call uniq(task['waiting'])
+		call s:ReplaceLineWithTask(task, lnum)
+	
 	endfor
 endfunction
 
-function! s:ModifyTaskToNote(lines)
-	for i in a:lines
-		execute i.'substitute/\v^\s*\zs- (\[.\] )?\ze/- /'
+function! s:Input(msg)
+	let input = ''
+	
+	let char = ''
+	" 13 = Enter
+	while char != 13
+		
+		" 8 = <C-Bs>
+		if char ==# 8
+			let input = input[0:-2]
+		else
+			let input = input . nr2char(char)
+		endif
+		
+		redraw | echom a:msg." ".input
+		
+		let char = getchar()
+	endwhile
+	
+	return input
+endfunction
+
+function! s:ModifyTaskType(lines)
+	for lnum in a:lines
+		let line = getline(lnum)
+		
+		" check if line is task or note
+		if s:IsLineNote(line) == v:false && s:IsLineTask(line) == v:false
+			echoerr "No line or task in line ".lnum
+			return
+		endif
+	
+		let task = s:ExtractLineData(line)
+		
+		if task['type'] ==# 'task'
+			let task['type'] = 'note'
+		elseif task['type'] ==# 'note'
+			let task['type'] = 'task'
+		endif
+		
+		call s:ReplaceLineWithTask(task, lnum)
+	
 	endfor
 endfunction
 
-function! s:ModifyTaskRmID(lines)
-	for i in a:lines
-		execute i.'substitute/\v0x\x{8}//'
+function! s:ModifyTaskTime(lines)
+	let time = s:Input("Enter time: ")
+	if trim(time) ==# ''
+		let time = -1
+	endif
+		
+	for lnum in a:lines
+		let line = getline(lnum)
+		
+		" check if line is task or note
+		if s:IsLineNote(line) == v:false && s:IsLineTask(line) == v:false
+			echoerr "No line or task in line ".lnum
+			return
+		endif
+	
+		let task = s:ExtractLineData(line)
+		let task['date']['time'] = time
+		call s:ReplaceLineWithTask(task, lnum)
+	
 	endfor
 endfunction
 
-function! s:ModifyTaskPrompt(type)
-	let selections = [
-				\ 'done',
-				\ 'todo',
-				\ 'failed',
-				\ 'cancelled',
-				\ 'block',
-				\ 'rm waiting',
-				\ 'add waiting',
-				\ 'action',
-				\ 'priority',
-				\ 'to task',
-				\ 'to note',
-				\ 'rm ID',
-				\ ]
-	let selections_dialog = [
-				\ '&done',
-				\ '&todo',
-				\ '&failed',
-				\ '&cancelled',
-				\ '&block',
-				\ 'r&m waiting',
-				\ 'add &waiting',
-				\ '&action',
-				\ '&priority',
-				\ 'to ta&sk',
-				\ 'to n&ote',
-				\ '&rm ID',
-				\ ]
-	let input = confirm('Modify Task(s): ', join(selections_dialog, "\n"))
+function! s:ModifyTaskDate(lines)
+	let input = s:Input("Enter date: ")
 
+	if input =~# '\v[+-]\d+(d|w|mo|y)'
+		let today = strftime('%Y-%m-%d')
+		let date  = {'date' : trim(system('dateadd '.today.' '.input))}
+	else
+		let date = s:ExtractDateData(input)
+		if date['date'] == -1 && date['time'] == -1 && date['weekday'] == -1
+			let date = {}
+		endif
+	endif
+		
+	for lnum in a:lines
+		let line = getline(lnum)
+		
+		" check if line is task or note
+		if s:IsLineNote(line) == v:false && s:IsLineTask(line) == v:false
+			echoerr "No line or task in line ".lnum
+			return
+		endif
+	
+		let task = s:ExtractLineData(line)
+		if empty(date)
+			let task['date'] = {}
+		else
+			let task['date']['date'] = date['date']
+		endif
+		
+		call s:ReplaceLineWithTask(task, lnum)
+	
+	endfor
+endfunction
+
+function! s:ModifyTaskPriority(lines)
+	
+	echom "Enter priority ([0-9]): "
+	let char = nr2char(getchar())
+	if char !~# '\v\d+'
+		echoerr char." is not a number!"
+		return
+	endif
+		
+	for lnum in a:lines
+		let line = getline(lnum)
+		
+		" check if line is task or note
+		if s:IsLineNote(line) == v:false && s:IsLineTask(line) == v:false
+			echoerr "No line or task in line ".lnum
+			return
+		endif
+	
+		let task = s:ExtractLineData(line)
+		let task['priority'] = char+0
+		call s:ReplaceLineWithTask(task, lnum)
+	
+	endfor
+endfunction
+
+function! s:ModifyTaskStatus(what, lines)
+	for lnum in a:lines
+		let line = getline(lnum)
+		
+		" check if line is task or note
+		if s:IsLineNote(line) == v:false && s:IsLineTask(line) == v:false
+			echoerr "No line or task in line ".lnum
+			return
+		endif
+		
+		let task = s:ExtractLineData(line)
+
+		if a:what ==# 'done'
+		\|| a:what ==# 'todo'
+		\|| a:what ==# 'failed'
+		\|| a:what ==# 'cancelled'
+			let task['status'] = a:what
+		else
+			echoerr "Wrong argument(what):".a:what
+			return
+		endif
+
+		call s:ReplaceLineWithTask(task, lnum)
+		
+	endfor
+endfunction
+
+function! s:RemoveTaskDate(lines)
+	for lnum in a:lines
+		let line = getline(lnum)
+		
+		" check if line is task or note
+		if s:IsLineNote(line) == v:false && s:IsLineTask(line) == v:false
+			echoerr "No line or task in line ".lnum
+			return
+		endif
+	
+		let task         = s:ExtractLineData(line)
+		let task['date'] = {}
+		call s:ReplaceLineWithTask(task, lnum)
+	
+	endfor
+endfunction
+
+function! s:RemoveTaskTime(lines)
+	for lnum in a:lines
+		let line = getline(lnum)
+		
+		" check if line is task or note
+		if s:IsLineNote(line) == v:false && s:IsLineTask(line) == v:false
+			echoerr "No line or task in line ".lnum
+			return
+		endif
+	
+		let task         = s:ExtractLineData(line)
+		let task['date']['time'] = -1
+		call s:ReplaceLineWithTask(task, lnum)
+	
+	endfor
+endfunction
+
+function! s:RemoveTaskBlocking(lines)
+	for lnum in a:lines
+		let line = getline(lnum)
+		
+		" check if line is task or note
+		if s:IsLineNote(line) == v:false && s:IsLineTask(line) == v:false
+			echoerr "No line or task in line ".lnum
+			return
+		endif
+	
+		let task             = s:ExtractLineData(line)
+		let task['blocking'] = v:false
+		call s:ReplaceLineWithTask(task, lnum)
+	
+	endfor
+endfunction
+
+function! s:RemoveTaskId(lines)
+	for lnum in a:lines
+		let line = getline(lnum)
+		
+		" check if line is task or note
+		if s:IsLineNote(line) == v:false && s:IsLineTask(line) == v:false
+			echoerr "No line or task in line ".lnum
+			return
+		endif
+	
+		let task       = s:ExtractLineData(line)
+		let task['id'] = -1
+		call s:ReplaceLineWithTask(task, lnum)
+	
+	endfor
+endfunction
+
+function! s:RemoveTaskWaiting(lines)
+	for lnum in a:lines
+		let line = getline(lnum)
+		
+		" check if line is task or note
+		if s:IsLineNote(line) == v:false && s:IsLineTask(line) == v:false
+			echoerr "No line or task in line ".lnum
+			return
+		endif
+	
+		let task = s:ExtractLineData(line)
+		
+		if len(task['waiting']) == 0
+			return
+		endif
+		
+		let blocks           = s:PrependSelectionWithNumbers(task['waiting'])
+		let blocks_selection = extend(blocks, ['[a]ll'], 0)
+		
+		echom 'Select ID(s): '.join(blocks_selection, ', ')
+		let char = nr2char(getchar())
+
+		if char ==# 'a'
+			let task['waiting'] = []
+		else
+			call remove(task['waiting'], char-1)
+		endif
+		
+		call s:ReplaceLineWithTask(task, lnum)
+	
+	endfor
+	
+endfunction
+
+function! s:RemoveTaskPrompt(type)
+	echom 'Remove from Task(s):    d[a]te    ti[m]e    [w]aiting    [b]locking    [i]d'
+	let char = nr2char(getchar())
+	
 	if a:type ==# 'V'
 		let start = line("'<")
 		let end   = line("'>")
@@ -2628,30 +2827,70 @@ function! s:ModifyTaskPrompt(type)
 		let lines = [ line(".") ]
 	endif
 	
-	if selections[input-1] ==# 'done'
+	if char ==# 'a'
+		call s:RemoveTaskDate(lines)
+	elseif char ==# 'm'
+		call s:RemoveTaskTime(lines)
+	elseif char ==# 'w'
+		call s:RemoveTaskWaiting(lines)
+	elseif char ==# 'b'
+		call s:RemoveTaskBlocking(lines)
+	elseif char ==# 'i'
+		call s:RemoveTaskId(lines)
+	endif
+endfunction
+
+function! s:ChangeTaskPrompt(type)
+	echom 'Change Task(s):    [d]one    [t]odo    [f]ailed    [c]ancelled    [p]riority    d[a]te    ti[m]e    act[i]on    t[y]pe'
+	let char = nr2char(getchar())
+	
+	if a:type ==# 'V'
+		let start = line("'<")
+		let end   = line("'>")
+		let lines = range(start, end)
+	elseif a:type ==# 'char'
+		let lines = [ line(".") ]
+	endif
+	
+	if char ==# 'd'
 		call s:ModifyTaskStatus('done', lines)
-	elseif selections[input-1] ==# 'todo'
+	elseif char ==# 't'
 		call s:ModifyTaskStatus('todo', lines)
-	elseif selections[input-1] ==# 'failed'
+	elseif char ==# 'f'
 		call s:ModifyTaskStatus('failed', lines)
-	elseif selections[input-1] ==# 'cancelled'
+	elseif char ==# 'c'
 		call s:ModifyTaskStatus('cancelled', lines)
-	elseif selections[input-1] ==# 'block'
-		call s:ModifyTaskBlock(lines)
-	elseif selections[input-1] ==# 'rm waiting'
-		call s:ModifyTaskWaitingRemove(lines)
-	elseif selections[input-1] ==# 'add waiting'
-		call s:ModifyTaskWaitingAdd(lines)
-	elseif selections[input-1] ==# 'to task'
-		call s:ModifyTaskToTask(lines)
-	elseif selections[input-1] ==# 'to note'
-		call s:ModifyTaskToNote(lines)
-	elseif selections[input-1] ==# 'action'
-		echoe "Not implemented"
-	elseif selections[input-1] ==# 'priority'
-		echoe "Not implemented"
-	elseif selections[input-1] ==# 'rm ID'
-		call s:ModifyTaskRmID(lines)
+	elseif char ==# 'p'
+		call s:ModifyTaskPriority(lines)
+	elseif char ==# 'a'
+		call s:ModifyTaskDate(lines)
+	elseif char ==# 'm'
+		call s:ModifyTaskTime(lines)
+	elseif char ==# 'i'
+		call s:ModifyTaskAction(lines)
+	elseif char ==# 'y'
+		call s:ModifyTaskType(lines)
+	endif
+endfunction
+
+function! s:AddTaskPrompt(type)
+	echom 'Add to Task(s):    act[i]on    [w]aiting    [b]locking'
+	let char = nr2char(getchar())
+	
+	if a:type ==# 'V'
+		let start = line("'<")
+		let end   = line("'>")
+		let lines = range(start, end)
+	elseif a:type ==# 'char'
+		let lines = [ line(".") ]
+	endif
+	
+	if char ==# 'i'
+		call s:AddTaskAction(lines)
+	elseif char ==# 'w'
+		call s:AddTaskWaiting(lines)
+	elseif char ==# 'b'
+		call s:AddTaskBlocking(lines)
 	endif
 endfunction
 
@@ -2670,155 +2909,8 @@ function! s:YankTaskPrompt()
 endfunction
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-"														Generated Dates															"
+"												String/Line Manipulation 												"
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-
-function! s:IsDateInList(haystack, needle)
-	for i in a:haystack
-		if a:needle ==# i.date
-			return v:true
-		endif
-	endfor
-	return v:false
-endfunction
-
-function! s:IsInQfList(needle, haystack)
-	for i in a:haystack
-		let date = s:ExtractDate(i.text)['date']
-		if a:needle ==# date
-			return v:true
-		endif
-	endfor
-	return v:false
-endfunction
-
-function! s:GetDatefileName()
-	let filepath = expand('%:h')
-	let filename = expand('%:t:r')
-	return filepath.'/.'.filename.'-dates.vdo'	
-endfunction
-
-function! s:CleanupAllDatefiles()
-	" save
-	call s:SaveLocation()
-	let buffers_save = s:SaveBuffers()
-	" TODO this might also blow up?
-	execute 'args ./**/*\.vdo'
-	execute 'bufdo call s:CleanUpDatefile()'
-	execute 'bufdo update!'
-	" restore 
-	call s:RestoreLocation()
-	call s:RestoreBuffers(buffers_save)
-endfunction
-command! -nargs=0 VdoCleanDatefiles	:call s:CleanupAllDatefiles()
-
-function! s:SortDateFile()
-	let save_cursor = getcurpos()
-	let save_file = expand('%')
-	let datefile = s:GetDatefileName()
-	execute 'edit! '.datefile
-	execute '%sort'
-	execute 'write!'
-	let buf = bufnr()
-	execute 'edit '.save_file
-	call setpos('.', save_cursor)
-	execute buf.'bdelete!'
-endfunction
-
-function! s:UpdateFirstLineOfDateFile()
-	echom "Updating first line datefile of file ".expand('%')
-	" check if project has any tags
-	if has_key(s:project_tree['flags'], 'tag') == v:false
-		return
-	endif
-	" only continue if there is already a datefile
-	if filereadable(s:GetDatefileName()) == v:false
-		return
-	endif
-	call s:SaveLocation()
-	execute 'edit! '.s:GetDatefileName()
-	call setline('1', join(s:project_tree['flags']['tag'], " "))
-	update!
-	let buf = bufnr()
-	call s:RestoreLocation()
-endfunction
-
-" TODO move to utility
-function! s:InList(haystack, needle)
-	for i in a:haystack
-		if a:needle ==# i | return v:true | endif
-	endfor | return v:false
-endfunction
-
-function! s:GetIndexOfValue(haystack, needle)
-	let idx = 0
-	while idx < len(a:haystack)
-		if a:needle ==# a:haystack[idx]['date']
-			return idx 
-		endif
-		let idx = idx + 1
-	endwhile
-	return v:false
-endfunction
-
-function! s:GenerateDatesFromRepetition(task)
-	let dates = []
-	let rep   = a:task['repetition']
-
-	if rep['starttime'] != -1
-		call add(dates, {'date':rep['startdate'], 'time' : rep['starttime']})
-		let start = trim(system('dateadd '.shellescape(rep['startdate']).' +'.rep['operand'].''.rep['operator']))
-	else
-		let start = rep['startdate']
-	endif
-		
-	" Add repetitions into the future, but limit how many.
-	" We don't want do flood the datefiles with too much data, otherwise
-	" grepping will be slowed down.
-	if rep['enddate'] == -1
-		let today = strftime('%Y-%m-%d')
-
-		if rep['operator'] ==# 'd'
-			let limit = trim(system('dateadd '.shellescape(today).' +3mo'))
-		elseif rep['operator'] ==# 'w'
-			let limit = trim(system('dateadd '.shellescape(today).' +6mo'))
-		elseif rep['operator'] ==# 'mo'
-			let limit = trim(system('dateadd '.shellescape(today).' +2y'))
-		elseif rep['operator'] ==# 'y'
-			let limit = trim(system('dateadd '.shellescape(today).' +30y'))
-		else
-			let limit = trim(system('dateadd '.shellescape(today).' +3mo'))
-		endif
-	else
-		let limit = rep['enddate']
-	endif
-	
-	let cur = start
-	while cur <=# limit
-		if rep['endtime'] == -1 && rep['starttime'] != -1
-			call add(dates, {'date': cur, 'time': rep['starttime']})
-		else
-			call add(dates, {'date': cur, 'time': -1})
-		endif
-		" date addition
-		let cur = trim(system('dateadd '.shellescape(cur).' +'.rep['operand'].rep['operator']))	
-	endwhile
-		
-	if rep['endtime'] != -1 && s:IsDateInList(dates, rep['enddate']) == v:true
-		let idx = s:GetIndexOfValue(dates, rep['enddate'])
-		let dates[idx]['time'] = rep['endtime']
-	endif
-	
-	return dates
-endfunction
-
-" extends `t1` with the attributes of `t2`
-" already existing attributes will be overwritten
-function! s:ExtendTask(t1, t2)
-	" overwrite: text
-	let a:t1['text'] = a:t2['text']
-	return a:t1
-endfunction
 
 function! s:CompileTaskString(task)
 	let str = ''
@@ -2839,8 +2931,11 @@ function! s:CompileTaskString(task)
 
 	" task or note
 	if t['type'] ==# 'note'
-		let str = str.'- '
+		let str = str.'-'
 	elseif t['type'] ==# 'task'
+		if t['status'] == -1
+			let t['status'] = 'todo'
+		endif
 		let str = str.'- ['.lut[t['status']].']'
 	endif
 
@@ -2861,10 +2956,8 @@ function! s:CompileTaskString(task)
 		let time = '{'
 		
 		" weekday
-		if date['weekday'] != -1
-			let dayofweek = trim(system('date +%a --date='.date['date']))
-			let time = time.dayofweek.": "
-		endif
+		let dayofweek = trim(system('date +%a --date='.date['date']))
+		let time = time.dayofweek.": "
 
 		" date
 		if date['date'] != -1
@@ -2924,7 +3017,7 @@ function! s:CompileTaskString(task)
 	endif
 
 	" blocking
-	if t['blocking'] != -1
+	if t['blocking'] != v:false
 		let str = str.' $block'
 	endif
 	
@@ -2936,11 +3029,11 @@ function! s:CompileTaskString(task)
 	return str
 endfunction
 
-function! s:ExtendLineWithTask(t1, dates)
+function! s:ExtendLineWithTask(t1, dates, lnum)
 	" skip if datefile
 	if s:IsDateFile() == v:true | return | endif
 	
-	let line = getline('.')
+	let line = getline(a:lnum)
 	" check if date is in datelist
 	let t2       = s:ExtractLineData(line)
 	let datetime = {}
@@ -2958,12 +3051,148 @@ function! s:ExtendLineWithTask(t1, dates)
 	if empty(datetime) == v:true
 		return
 	endif
-	echom "extending line: ".line
 	" extend & set
-	let tnew                 = s:ExtendTask(t2, a:t1)
+	let tnew['text']         = t2['text']
 	let tnew['date']['time'] = datetime['time']
 	let str                  = s:CompileTaskString(tnew)
-	call setline('.', str)
+	call setline(a:lnum, str)
+endfunction
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+"                             References                                "
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+function! s:UpdateReferences(lines)
+	echom "Updating references."
+	" save location
+	call s:SaveLocation()
+	for lnum in a:lines
+		let line = getline(lnum)
+		" check if line is task or note
+		if s:IsLineTask(line) == v:false && s:IsLineNote(line) == v:false
+			continue
+		endif
+		" get data
+		let task = s:ExtractLineData(line)
+		" check if line has an id
+		if task['id'] == -1 | continue | endif
+		" escape id
+		let id = escape(task['id'], '|')
+		" updating of references
+		execute 'silent! bufdo global/\v<0x'.id.'(\s|$)>/call s:ReplaceLineWithTask(task, line("."))'
+	endfor
+	" save changed buffers
+	execute 'silent! bufdo update'
+	" restore original location
+	call s:RestoreLocation()
+endfunction
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+"																Dates				                            "
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+function! s:DatesGetIndexOfValue(haystack, needle)
+	let idx = 0
+	while idx < len(a:haystack)
+		if a:needle ==# a:haystack[idx]['date']
+			return idx 
+		endif
+		let idx = idx + 1
+	endwhile
+	return v:false
+endfunction
+
+function! s:IsDateInList(haystack, needle)
+	for i in a:haystack
+		if a:needle ==# i['date']
+			return v:true
+		endif
+	endfor
+	return v:false
+endfunction
+
+function! s:SortDateFile()
+	let save_cursor = getcurpos()
+	let save_file = expand('%')
+	let datefile = s:GetDatefileName()
+	execute 'edit! '.datefile
+	execute '%sort'
+	execute 'write!'
+	let buf = bufnr()
+	execute 'edit '.save_file
+	call setpos('.', save_cursor)
+	execute buf.'bdelete!'
+endfunction
+
+function! s:UpdateFirstLineOfDateFile()
+	echom "Updating first line datefile of file ".expand('%')
+	" check if project has any tags
+	if has_key(s:project_tree['flags'], 'tag') == v:false
+		return
+	endif
+	" only continue if there is already a datefile
+	if filereadable(s:GetDatefileName()) == v:false
+		return
+	endif
+	call s:SaveLocation()
+	execute 'edit! '.s:GetDatefileName()
+	call setline('1', join(s:project_tree['flags']['tag'], " "))
+	update!
+	let buf = bufnr()
+	call s:RestoreLocation()
+endfunction
+
+" TODO rewrite or remove
+function! s:CleanupAllDatefiles()
+	" save
+	call s:SaveLocation()
+	let buffers_save = s:SaveBuffers()
+	" TODO this might also blow up?
+	execute 'args ./**/*\.vdo'
+	execute 'bufdo call s:CleanUpDatefile()'
+	execute 'bufdo update!'
+	" restore 
+	call s:RestoreLocation()
+	call s:RestoreBuffers(buffers_save)
+endfunction
+command! -nargs=0 VdoCleanDatefiles	:call s:CleanupAllDatefiles()
+
+function! s:UpdateDates(lines)
+	echom "Updating dates."
+	" skip if datefile
+	if s:IsDateFile() == v:true | return | endif
+	" save location
+	call s:SaveLocation()
+	" get datefile for later
+	let datefile = s:GetDatefileName() 
+
+	for lnum in a:lines
+		let line = getline(lnum)
+		" check if line is task or note
+		if s:IsLineTask(line) == v:false && s:IsLineNote(line) == v:false
+			continue
+		endif
+		
+		let s:used_dates = []
+		let s:used_ids   = []
+		" get data
+		let task = s:ExtractLineData(line)
+		" check if line has a repetition
+		if empty(task['repetition']) == v:true
+			continue
+		endif
+		" generate list of dates from repetition
+		let dates = s:GenerateDatesFromRepetition(task)
+		" update references of auto-generated tasks in arglist
+		execute 'silent! bufdo global/\v<0x'.task['id'].'(\|\d+)>/call s:ExtendLineWithTask(task, dates, line("."))'
+		" update the dates in the datefile
+		call s:UpdateDatefile(datefile, task, dates)
+	endfor
+
+	" save changes
+	execute 'silent! bufdo update'
+	" restore location
+	call s:RestoreLocation()
 endfunction
 
 function! s:UpdateDatefile(datefile, task, dates)
@@ -3033,60 +3262,234 @@ function! s:CleanUpDatefile()
 	call s:RestoreLocation()
 endfunction
 
-function! s:UpdateDates()
-	echom "Updating dates of file ".expand('%')
-	" skip if datefile
-	if s:IsDateFile() == v:true | return | endif
-	" no changes, abort
-	if len(s:changedlines) == 0 | return | endif
-	" save location
-	call s:SaveLocation()
-	" get datefile for later
-	let datefile = s:GetDatefileName() 
+function! s:GenerateDatesFromRepetition(task)
+	let dates = []
+	let rep   = a:task['repetition']
 
-	for line in s:changedlines
-		" check if line is task or note
-		if s:IsLineTask(line) == v:false && s:IsLineNote(line) == v:false
-			continue
-		endif
+	if rep['starttime'] != -1
+		call add(dates, {'date':rep['startdate'], 'time' : rep['starttime']})
+		let start = trim(system('dateadd '.shellescape(rep['startdate']).' +'.rep['operand'].''.rep['operator']))
+	else
+		let start = rep['startdate']
+	endif
 		
-		let s:used_dates = []
-		let s:used_ids   = []
-		" get data
-		let task = s:ExtractLineData(line)
-		" check if line has a repetition
-		if empty(task['repetition']) == v:true
-			continue
-		endif
-		" generate list of dates from repetition
-		let dates = s:GenerateDatesFromRepetition(task)
-		" update references of auto-generated tasks in arglist
-		execute 'silent! bufdo global/\v<0x'.task['id'].'(\|\d+)>/call s:ExtendLineWithTask(task, dates)'
-		" update the dates in the datefile
-		call s:UpdateDatefile(datefile, task, dates)
-	endfor
+	" Add repetitions into the future, but limit how many.
+	" We don't want do flood the datefiles with too much data, otherwise
+	" grepping will be slowed down.
+	if rep['enddate'] == -1
+		let today = strftime('%Y-%m-%d')
 
-	" save changes
-	execute 'silent! bufdo update'
-	" restore location
-	call s:RestoreLocation()
+		if rep['operator'] ==# 'd'
+			let limit = trim(system('dateadd '.shellescape(today).' +3mo'))
+		elseif rep['operator'] ==# 'w'
+			let limit = trim(system('dateadd '.shellescape(today).' +6mo'))
+		elseif rep['operator'] ==# 'mo'
+			let limit = trim(system('dateadd '.shellescape(today).' +2y'))
+		elseif rep['operator'] ==# 'y'
+			let limit = trim(system('dateadd '.shellescape(today).' +30y'))
+		else
+			let limit = trim(system('dateadd '.shellescape(today).' +3mo'))
+		endif
+	else
+		let limit = rep['enddate']
+	endif
+	
+	let cur = start
+	while cur <=# limit
+		if rep['endtime'] == -1 && rep['starttime'] != -1
+			call add(dates, {'date': cur, 'time': rep['starttime']})
+		else
+			call add(dates, {'date': cur, 'time': -1})
+		endif
+		" date addition
+		let cur = trim(system('dateadd '.shellescape(cur).' +'.rep['operand'].rep['operator']))	
+	endwhile
+		
+	if rep['endtime'] != -1 && s:IsDateInList(dates, rep['enddate']) == v:true
+		let idx = s:DatesGetIndexOfValue(dates, rep['enddate'])
+		let dates[idx]['time'] = rep['endtime']
+	endif
+	
+	return dates
 endfunction
 
-" when running `mv`, `rm`, `cp`, etc. we have to make sure that the bufferlist is up to date
-function! s:UpdateBufferlist()
-	" unload buffers where the corresponding file doesn't exist anymore
-	let buffers = getbufinfo({'buflisted':1})	 
-	for b in buffers
-		if filereadable(bufname(b['bufnr'])) == v:false
-			echom "wiping buffer :".bufname(b['bufnr'])
-			execute "bwipeout!".b['bufnr']
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+"                             Validation                                "
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+function! s:GetDiff()
+	
+	redir => l:changedlines
+	silent execute 'w !diff --unchanged-line-format="" --old-line-format=":\%dn" --new-line-format=";\%dn" % -'
+	redir END
+	
+	let l:split = split(l:changedlines, '')
+	if len(l:split) == 0
+		let s:changedlines = []
+		return { 'insertions':[], 'deletions':[], 'changes':[] }
+	endif
+
+	let dif = s:ExtractFromString(l:split[0], { 'insertions':1, 'deletions': 1 })
+	let dif = extend(dif, { 'changes':[] })
+	
+	"find modified	
+	for d in dif['deletions']
+		if s:InList(dif['insertions'], d) == v:true
+			call add(dif['changes'], d)
+			call filter(dif['insertions'], 'v:val != '.d)
+			call filter(dif['deletions'], 'v:val != '.d)
 		endif
 	endfor
+
+	return dif
+endfunction
+
+function! s:ValidateSyntax(lines)
 	
-	" load files which are not existing
-	call s:SaveLocation()
-	execute 'args '.g:vimdoit_projectsdir.'/**/*.vdo '.g:vimdoit_projectsdir.'/**/.*.vdo'
-	call s:RestoreLocation()
+	let s:local_syntax_errors = []
+	
+	" check if line is task/note
+	for lnum in a:lines
+		let line = getline(lnum)
+		if s:IsLineNote(line) == v:false && s:IsLineTask(line) == v:false
+			call filter(a:lines, 'v:val !=# '.lnum)
+		endif
+	endfor
+
+	" syntax check
+	for lnum in a:lines
+		let line = getline(lnum)
+		
+		" check syntax
+		let res = s:CheckSyntaxSingle(line, lnum)
+		if res !=# ''
+			call add(s:local_syntax_errors, { 'msg' : res, 'lnum' : lnum  })
+		endif
+	endfor
+
+	" throw possible syntax errors
+	if len(s:local_syntax_errors) > 0
+		throw "syntax-error"
+	endif
+	
+endfunction
+
+function! s:ValidateId(lines)
+	for lnum in a:lines
+		let line = getline(lnum)
+		let item = s:ExtractLineData(line)
+		if item['id'] == -1
+			let item['id'] = s:NewID()
+			call s:ReplaceLineWithTask(item, lnum)
+		endi
+	endfor
+endfunction
+
+function! s:ValidateRebuilt(lines)
+	for lnum in a:lines
+		let line = getline(lnum)
+		let item = s:ExtractLineData(line)
+		call s:ReplaceLineWithTask(item, lnum)
+	endfor
+endfunction
+
+function! s:ValidateChanges(changes)
+	echom "Validating changes."
+	" syntax check
+	call s:ValidateSyntax(a:changes)
+	" id check
+	call s:ValidateId(a:changes)
+	" re-build line
+	call s:ValidateRebuilt(a:changes)
+	" update references
+	call s:UpdateReferences(a:changes)
+	" update dates
+	call s:UpdateDates(a:changes)
+endfunction
+
+function! s:ValidateInsertions(insertions)
+	echom "Validating insertions."
+	" syntax check
+	call s:ValidateSyntax(a:insertions)
+	" id check
+	call s:ValidateId(a:insertions)
+	" re-build line
+	call s:ValidateRebuilt(a:insertions)
+	" update references
+	call s:UpdateReferences(a:insertions)
+	" update dates
+	call s:UpdateDates(a:insertions)
+endfunction
+function! s:ValidateDeletions(deletions)
+	echom "Validating deletions."
+endfunction
+
+function! s:TextChangedWrapper()
+	try
+		undojoin | call s:TextChanged()
+	catch /^Vim\%((\a\+)\)\=:E790/
+		" execute 'normal! g-'
+		" execute 'normal! g-'
+		undo 
+		undo
+		" call s:TextChanged()
+	endtry
+endfunction
+
+function! s:TextChanged()
+	" skip if datefile
+	if s:IsDateFile() == v:true | return | endif
+	" get diff
+	let changes = s:GetDiff()
+	" check if there is anything to do
+	if len(changes['insertions']) == 0
+				\ && len(changes['deletions']) == 0
+				\ && len(changes['changes']) == 0
+		" nothing to do
+		return
+	endif
+	" reset matches set by previous syntax checks
+	match none
+	" update buffer list
+	call s:UpdateBufferlist()
+	
+	try 
+
+		if len(changes['insertions']) > 0
+			call s:ValidateInsertions(changes['insertions'])
+		endif
+		
+		if len(changes['deletions']) > 0
+			call s:ValidateDeletions(changes['deletions'])
+		endif
+		
+		if len(changes['changes']) > 0
+			call s:ValidateChanges(changes['changes'])
+		endif
+		
+		call s:CleanUpDatefile()
+		call s:UpdateFirstLineOfDateFile()
+		" call s:ParseFile()
+		" call s:DataComputeProgress()
+		" call s:DrawSectionOverview()
+		" call s:DrawProjectStatistics()
+		" silent update
+		echom "Writing file. Done."
+		
+	catch /syntax-error/
+		" highlight syntax errors
+		let lines = map(s:local_syntax_errors, 'v:val["lnum"]')
+		let lines = map(lines, '"%".v:val."l"')
+		let pat   = "(".join(lines, '|').").*$"
+		execute 'match Error "\v'.pat.'"'
+		highlight link VdoError Error
+		" display error message
+		echoerr "Syntax errors in line(s) ".join(lines, ', ')
+	catch /.*/
+		echoerr v:exception." in ".v:throwpoint
+	endtry
+	
 endfunction
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -3109,9 +3512,17 @@ if exists("g:vimdoit_did_load_mappings") == v:false
 		" Filter quickfix list
 		nnoremap <leader>qf	:<c-u>call <SID>FilterQuickfix()<cr>
 		" Modify Task Prompt (Normal)
-		nnoremap M	:<c-u>call <SID>ModifyTaskPrompt('char')<cr>
+		nnoremap M	:<c-u>call <SID>ChangeTaskPrompt('char')<cr>
 		" Modify Task Prompt (Visual)
-		vnoremap M	:<c-u>call <SID>ModifyTaskPrompt(visualmode())<cr>
+		vnoremap M	:<c-u>call <SID>ChangeTaskPrompt(visualmode())<cr>
+		" Remove Task Prompt (Normal)
+		nnoremap R	:<c-u>call <SID>RemoveTaskPrompt('char')<cr>
+		" Remove Task Prompt (Visual)
+		vnoremap R	:<c-u>call <SID>RemoveTaskPrompt(visualmode())<cr>
+		" Add Task Prompt (Normal)
+		nnoremap <leader>A	:<c-u>call <SID>AddTaskPrompt('char')<cr>
+		" Add Task Prompt (Visual)
+		vnoremap <leader>A	:<c-u>call <SID>AddTaskPrompt(visualmode())<cr>
 		" Jump in Quickfix List to Today
 		nnoremap <leader>qj	:<c-u>call <SID>JumpToToday()<cr>
 		" Yank Task Prompt (Normal)
@@ -3120,22 +3531,19 @@ if exists("g:vimdoit_did_load_mappings") == v:false
 		let g:vimdoit_did_load_mappings = 1
 endif
 
+
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 "                             Autocommands                              "
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-
 augroup VimDoit
 	autocmd!
-	" disable .swap files, otherwise changing tasks/notes in external files won't work
-	" TODO maybe this won't be necessary anymore, after we switched to using
-	" `global
-	autocmd BufEnter *.vdo setlocal noswapfile
-	autocmd BufWritePre *.vdo call s:ProjectWritePre()
 	autocmd ShellCmdPost * call s:UpdateBufferlist()
+	autocmd TextChanged *.vdo call s:TextChangedWrapper()
 augroup END
 
 " open all files
 execute 'argadd '.g:vimdoit_projectsdir.'/**/*.vdo '.g:vimdoit_projectsdir.'/**/.*.vdo'
+" argadd ./inbox.vdo
 
 " Restore user's options.
 let &cpo = s:save_cpo
