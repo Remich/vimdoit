@@ -24,7 +24,7 @@ if exists("g:vimdoit_projectsdir") == v:false
 endif
 
 " check if necessary tools are installed
-let s:tools = ['diff', 'dateadd', 'dround']
+let s:tools = ['diff', 'date', 'dateadd', 'dround', 'grep', 'git' ]
 
 for t in s:tools
 	if trim(system("whereis ".t)) ==# t.":"
@@ -48,6 +48,8 @@ let g:vimdoit_quickfix_type = 'none'
 let s:changedlines          = []
 let s:syntax_errors         = []
 let s:parse_runtype         = 'single'
+let s:undo_enable						= v:false
+let s:undo_event						= v:false
 
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 "																Utility Functions													 "
@@ -57,6 +59,41 @@ function! s:InList(haystack, needle)
 	for i in a:haystack
 		if a:needle ==# i | return v:true | endif
 	endfor | return v:false
+endfunction
+
+function! s:StackPush(list, value)
+	call add(a:list, a:value)
+endfunction
+
+function! s:StackPop(list)
+	if s:StackEmpty(a:list) == v:true
+		return -1
+	else
+		let top = s:StackTop(a:list)
+		call remove(a:list, -1)
+		return top
+	endif
+endfunction
+
+function! s:StackTop(list)
+	return a:list[-1]
+endfunction
+
+function! s:StackLen(list)
+	return len(a:list)
+endfunction
+
+function! s:StackEmpty(list)
+	if s:StackLen(a:list) == 0
+		return v:true
+	else
+		return v:false
+endfunction
+
+function! s:StackFree(list)
+	if s:StackEmpty(a:list) == v:false
+		call remove(a:list, 0, -1)
+	endif
 endfunction
 
 function! s:GetDatefileName()
@@ -80,6 +117,7 @@ function! s:SaveLocation()
 				\'cursor' : getcurpos(),
 				\'buffer' : bufname(),
 				\'cwd'		: getcwd(),
+				\'winnr'  : winnr(),
 				\}
 	call add(s:location_stack, loc)
 endfunction
@@ -87,6 +125,7 @@ endfunction
 function! s:RestoreLocation()
 	let loc = s:location_stack[-1]
 	execute "cd ".loc['cwd']
+	call win_gotoid(loc['winnr'])
 	execute "buffer ".loc['buffer']
 	call setpos('.', loc['cursor'])
 	normal! zz
@@ -1151,7 +1190,7 @@ endfunction
 function! s:ExtractBlocking(line)
 	let flags = s:ExtractFlags(a:line)
 	if len(flags) == 0
-		return -1
+		return v:false
 	else
 		let block = s:ExtractPatternFromString(flags[0], s:patterns['blocking'])	
 		return len(block) == 0 ? v:false : v:true
@@ -3378,6 +3417,14 @@ function! s:TextChangedWrapper()
 endfunction
 
 function! s:TextChanged()
+
+	" abort if the text changed due to an undo/redo
+	if s:undo_event == v:true
+		let s:undo_event = v:false
+		echom "Abort TextChanged() due to s:undo_event!"
+		return
+	endif
+	
 	" skip if datefile
 	if s:IsDateFile() == v:true | return | endif
 	" get diff
@@ -3408,14 +3455,21 @@ function! s:TextChanged()
 			call s:ValidateChanges(changes['changes'])
 		endif
 		
-		call s:CleanUpDatefile()
+		if len(changes['deletions']) > 0 || len(changes['changes']) > 0
+			call s:CleanUpDatefile()
+		endif
+		
 		call s:UpdateFirstLineOfDateFile()
 		" call s:ParseFile()
 		" call s:DataComputeProgress()
 		" call s:DrawSectionOverview()
 		" call s:DrawProjectStatistics()
-		" silent update
+		silent update
 		echom "Writing file. Done."
+		
+		if s:undo_enable == v:true
+			call s:Commit()
+		endif
 		
 	catch /syntax-error/
 		" highlight syntax errors
@@ -3433,6 +3487,133 @@ function! s:TextChanged()
 endfunction
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+"                              Undo/Redo                                "
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+let s:git_commits = []
+let s:git_undo    = []
+let s:git_master  = 'master' " main branch to use
+
+function! s:InitUndo()
+	
+	let cur = s:GetCurrentBranch()
+	
+	if cur ==# s:git_master
+		echom "Init undo"
+		let s:undo_enable = v:true
+		silent call system('git checkout -b undo')
+	endif
+
+	call s:StackPush(s:git_commits, s:GetCurrentHash())
+	call s:CleanCommits(s:git_undo)
+	call s:StackFree(s:git_undo)
+endfunction
+
+function! s:Commit()
+	echom "Commiting changes"
+	silent call trim(system('git add --update'))
+	silent call trim(system('git add ./*'))
+	silent call trim(system('git commit -m '.shellescape(system('date +%s%N'))))
+	call s:StackPush(s:git_commits, s:GetCurrentHash())
+	call s:CleanCommits(s:git_undo)
+	call s:StackFree(s:git_undo)
+endfunction
+
+function! s:CleanCommits(list)
+	for i in a:list
+		call filter(s:git_commits, 'v:val != "'.i.'"')
+	endfor
+endfunction
+
+function! s:GetCurrentHash()
+	return trim(system('git log --pretty=format:"%H" -n 1'))
+endfunction
+
+function! s:GetCurrentBranch()
+	return trim(system('git rev-parse --abbrev-ref HEAD'))
+endfunction
+
+function! s:DoesBranchExist(branchname)
+	if trim(system('git branch | grep '.shellescape(a:branchname).' | wc -l')) ==# '0'
+		return v:false
+	else
+		return v:true
+	endif
+endfunction
+
+" command! -nargs=0 CleanupUndo	:call s:CleanupUndo()
+function! s:CleanupUndo()	
+	
+	if s:undo_enable == v:false
+		return
+	endif
+	
+	echom "Cleaning up undo…"
+	silent call system('git checkout -b tmp')
+	silent call system('git branch --force '.s:git_master.' tmp')
+	silent call system('git checkout '.s:git_master)
+	silent call system('git branch -D tmp')
+	silent call system('git branch -D undo')
+	sleep 5
+endfunction
+
+" command! -nargs=0 VdoRedo	:call s:Redo()
+" BROKEN: do not use!
+function! s:Undo()
+	echom "Undoing"
+	if s:StackLen(s:git_commits) <= 1
+		echom "No previous changes"
+		return
+	endif
+		
+	let s:undo_event = v:true
+	call s:StackPush(s:git_undo, s:StackPop(s:git_commits))
+	silent call system('git checkout '.s:StackTop(s:git_commits))
+
+	" call s:SaveLocation()
+	" edit!
+	echom "sleeping"
+	sleep 2 
+	echom "reloading"
+	checktime
+	edit!
+	" call s:RestoreLocation()
+endfunction
+
+" BROKEN: do not use!
+function! s:Redo()
+	echom "Redoing"
+	
+	if s:StackEmpty(s:git_undo) == v:true
+		echom "Already at newest change"
+		return
+	endif
+	
+	let s:undo_event = v:true
+	call s:StackPush(s:git_commits, s:StackPop(s:git_undo))
+	silent call system('git checkout '.s:StackTop(s:git_commits))
+	" call s:SaveLocation()
+	" edit!
+	echom "sleeping"
+	sleep 2 
+	echom "reloading"
+	checktime
+	edit!
+	" call s:RestoreLocation()
+endfunction
+command! -nargs=0 VdoUndo	:call s:Undo()
+
+function! s:PrintStacks()
+	echom "-------------"
+	echom "Stack commit:"
+	echom s:git_commits
+	echom "Stack undo:"
+	echom s:git_undo
+endfunction
+command! -nargs=0 VdoStack	:call s:PrintStacks()
+
+" init
+call s:InitUndo()
 "                               Mappings                                "
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
@@ -3467,7 +3648,15 @@ if exists("g:vimdoit_did_load_mappings") == v:false
 		nnoremap <leader>qj	:<c-u>call <SID>JumpToToday()<cr>
 		" Yank Task Prompt (Normal)
 		nnoremap Y	:<c-u>call <SID>YankTaskPrompt()<cr>
-
+		" Remap undo/redo to custom `Redo()` function
+		nnoremap g+ :<c-u>call <SID>Redo()<cr>
+		nnoremap U  :<c-u>call <SID>Redo()<cr>
+		nnoremap g- :<c-u>call <SID>Undo()<cr>
+		nnoremap u  :<c-u>call <SID>Undo()<cr>
+		nnoremap g+ <nop>
+		nnoremap U  <nop>
+		nnoremap g- <nop>
+		nnoremap u  <nop>
 		let g:vimdoit_did_load_mappings = 1
 endif
 
@@ -3478,12 +3667,12 @@ endif
 augroup VimDoit
 	autocmd!
 	autocmd ShellCmdPost * call s:UpdateBufferlist()
-	autocmd TextChanged *.vdo call s:TextChangedWrapper()
+	autocmd TextChanged *.vdo call s:TextChanged()
+	autocmd VimLeave *.vdo call s:CleanupUndo()
 augroup END
 
 " open all files
 execute 'argadd '.g:vimdoit_projectsdir.'/**/*.vdo '.g:vimdoit_projectsdir.'/**/.*.vdo'
-" argadd ./inbox.vdo
 
 " Restore user's options.
 let &cpo = s:save_cpo
