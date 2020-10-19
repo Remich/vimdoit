@@ -1985,14 +1985,17 @@ function! s:GrepTasksByStatus(status, path)
 		let pattern = "\\{.*\\}"
 		let title = 'tasks: scheduled'
 	elseif a:status ==# 'date'
-		let pattern = "\\{\\s*\\d{4}-\\d{2}-\\d{2}(\\s*\\d{2}:\\d{2})?\\s*\\}"
+		" let pattern = "\\{\\(\\(Mo\\|Di\\|Mi\\|Do\\|Fr\\|Sa\\|So\\):\\s\\)?\\d{4}-\\d{2}-\\d{2}(\\s*\\d{2}:\\d{2})?\\s*\\}"
+		let pattern = '\{.*\}'
+		" let pattern = "\\{.*?\\}"
+		" let pattern = escape(s:patterns['date'], '{\}(|)')
 		let title = 'tasks: date'
 	elseif a:status ==# 'repetition'
 		let pattern = "\\{\\s*\\d{4}-\\d{2}-\\d{2}\\\\|[a-z]{1,2}:.*\\}"
 		let title = 'tasks: repetition'
 	endif
 	
-	execute 'silent! grep! --pre '.g:vimdoit_plugindir.'/scripts/pre-project.sh --type-add '"vimdoit:*.vdo"' -t vimdoit "'.pattern.'" '.file | copen
+	execute 'silent! grep! --pre '.g:vimdoit_plugindir.'/scripts/pre-project.sh --type-add '"vimdoit:*.vdo"' -t vimdoit '.shellescape(pattern).' '.file | copen
 
 	let l:qf = getqflist()
 
@@ -2968,7 +2971,7 @@ function! s:CompileTaskString(task)
 
 		" enddate
 		if rep['enddate'] != -1
-			let time = time.rep['enddate']
+			let time = time.'|'.rep['enddate']
 		endif
 
 		" endtime
@@ -3574,7 +3577,7 @@ endfunction
 
 let s:git_commits = []
 let s:git_undo    = []
-let s:git_master  = 'dev' " main branch to use
+let s:git_master  = 'master' " main branch to use
 
 function! s:InitUndo()
 
