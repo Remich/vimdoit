@@ -3118,21 +3118,6 @@ function! s:UpdateFirstLineOfDateFile()
 	call s:RestoreLocation()
 endfunction
 
-" TODO rewrite or remove
-function! s:CleanupAllDatefiles()
-	" save
-	call s:SaveLocation()
-	let buffers_save = s:SaveBuffers()
-	" TODO this might also blow up?
-	execute 'args ./**/*\.vdo'
-	execute 'bufdo call s:CleanUpDatefile()'
-	execute 'bufdo update!'
-	" restore 
-	call s:RestoreLocation()
-	call s:RestoreBuffers(buffers_save)
-endfunction
-command! -nargs=0 VdoCleanDatefiles	:call s:CleanupAllDatefiles()
-
 function! s:PropagateRepetitions(lines)
 	echom "Propagating repetitions"
 	" skip if datefile
@@ -3166,6 +3151,38 @@ function! s:PropagateRepetitions(lines)
 		call s:UpdateDatefile(datefile, task, dates)
 	endfor
 
+	" restore location
+	call s:RestoreLocation()
+endfunction
+
+function! s:CleanUpRepetitions()
+	echom "Cleanup repetitions"
+	" abort, if there is not a datefile
+	if filereadable(s:GetDatefileName()) == v:false
+		return
+	endif
+	" save location
+	call s:SaveLocation()
+	" edit datefile
+	execute "edit! ".s:GetDatefileName()
+	" get all unique base-ids used in the datefile
+	let lines   = range(2, line('$'))
+	let baseids = []
+	for lnum in lines
+		call add(baseids, s:ExtractBaseId(getline(lnum)))
+	endfor
+	call uniq(sort(baseids))
+
+	" check for deletion
+	for id in baseids
+		" delete all parent-less auto-generated dates with `id`
+		if s:GetNumOccurences('\v<0x'.id.'>(\s|$)') == 0
+			" note: the following pattern is ok and won't delete tasks in regular files,
+			" because we are not using `bufdo global`
+			execute 'silent! global/\v<0x'.id.'\|\d+(\s|$)/delete'
+		endif
+	endfor
+	
 	" restore location
 	call s:RestoreLocation()
 endfunction
@@ -3243,10 +3260,10 @@ function! s:PropagateDeletedRepetitions(deletions)
 	if filereadable(s:GetDatefileName()) == v:false
 		return
 	endif
-	
+
 	" get deleted lines from the file before the change
 	let deleted = s:GetLinesOfDiskfile(a:deletions)
-	" get deleted lines
+
 	for line in deleted
 		" check if the deleted line has a repetition
 		let rep = s:ExtractRepetition(line['line'])
@@ -3269,53 +3286,8 @@ function! s:PropagateDeletedRepetitions(deletions)
 			" restore location
 			call s:RestoreLocation()
 			
-		endif
 	endfor
-endfunction
-
-" remove all auto-generated dates where there is no parent anymore
-function! s:CleanUpDatefile()
-	echom "Cleaning datefile of file ".expand('%')
 	
-	" skip if datefile
-	if s:IsDateFile() == v:true | return | endif
-
-	" skip if there is not datefile
-	if filereadable(s:GetDatefileName()) == v:false
-		return
-	endif
-
-	" save location
-	call s:SaveLocation()
-	" edit datefile
-	execute "edit! ".s:GetDatefileName()
-	
-	" get list of ids
-	let cur   = 2 " first line only has tags
-	let total = line('$')
-	let ids   = []
-	while cur <= total
-		let baseid = s:ExtractFromString(getline(cur), {'baseid':1})['baseid']
-		call add(ids, baseid)
-		let cur = cur + 1
-	endwhile
-
-	call uniq(sort(ids))
-
-	for id in ids
-		" only base ids
-		if s:GetNumOccurences('\v<0x'.id.'>(\s|$)') == 0
-			" note: the following pattern is ok and won't delete tasks in regular files,
-			" because we are not using `bufdo global`
-			execute 'silent! global/\v<0x'.id.'\|\d+(\s|$)/delete'
-		endif
-	endfor
-
-	" not in use, because of speed
-	" call s:SortDateFile()
-	
-	" restore location
-	call s:RestoreLocation()
 endfunction
 
 function! s:GenerateDatesFromRepetition(task)
@@ -3402,7 +3374,6 @@ function! s:GetDiff()
 endfunction
 
 function! s:GetLinesOfDiskfile(lines)
-	echom "Reading lines from disk"
 	let read = []
 	for i in a:lines
 		call add(read, {'lnum': i, 'line': trim(system('sed -n '.i.'p '.expand('%')))})
@@ -3503,30 +3474,28 @@ function! s:ProcessDeletions(deletions)
 	call s:PropagateDeletedRepetitions(a:deletions)
 endfunction
 
-function! s:ValidateCurrentLine()
-	let lines = [ line('.') ]
-	" reset matches set by previous syntax checks
-	match none
-	" syntax check
-	call s:ValidateSyntax(lines)
-	" id check
-	call s:ValidateId(lines)
-	" re-build line
-	call s:RebuiltLine(lines)
-	" propagate references
-	call s:PropagateReferences(lines)
-	" propagate repetitions
-	call s:PropagateRepetitions(lines)
-endfunction
-
 " process every line of the file
-command! ProcessFile :call s:ProcessFile()
-function! s:ProcessFile()
-	echom "Processing file ".expand('%')
+command! ProcessFile :call s:ProcessFile('all')
+function! s:ProcessFile(what)
 	" skip if datefile
 	if s:IsDateFile() == v:true | return | endif
-	" get line numbers of file
-	let lines = range(1, line('$')) 
+	
+	" decide which lines should be processed
+	if a:what ==# 'all'
+		" all lines of file
+		let lines = range(1, line('$')) 
+		echom "Processing file ".expand('%')
+	elseif a:what ==# 'visual'
+		" lines of current visual selection
+		let lines = range(line("'<"), line("'>"))
+		echom "Processing line ".join(lines, ',')." of file ".expand('%')
+	elseif a:what ==# 'current'
+		" only current line
+		let lines = [ line('.') ]
+		echom "Processing line ".join(lines, ',')." of file ".expand('%')
+	else
+		echoerr "Unknown argument for `a:what` :".a:what
+	endif
 
 	try
 		" syntax check
@@ -3539,10 +3508,8 @@ function! s:ProcessFile()
 		call s:PropagateReferences(lines)
 		" propagate repetitions
 		call s:PropagateRepetitions(lines)
-		" propagate deleted repetitions
-		call s:PropagateDeletedRepetitions(lines)
-		" propagate changed repetitions
-		call s:PropagateChangedRepetitions(lines)
+		" clean up repetitions
+		call s:CleanUpRepetitions()
 		" update first line of datefile
 		call s:UpdateFirstLineOfDateFile()
 	catch /.*/
@@ -3565,6 +3532,7 @@ function! s:TextChanged()
 		" nothing to do
 		return
 	endif
+	
 	" reset matches set by previous syntax checks
 	match none
 
@@ -3648,8 +3616,12 @@ if exists("g:vimdoit_did_load_mappings") == v:false
 		nnoremap r :<c-u>echom "Disabled in vimdoit."<cr>
 		
 
-		" validate current line
-		nnoremap <leader>v	:<c-u>call <SID>ValidateCurrentLine()<cr>
+		" process current line
+		nnoremap <leader>v	:<c-u>call <SID>ProcessFile('current')<cr>
+		" process visual selection
+		vnoremap <leader>v	:<c-u>call <SID>ProcessFile('visual')<cr>
+		" process whole file
+		nnoremap <leader>V	:<c-u>call <SID>ProcessFile('all')<cr>
 		
 		let g:vimdoit_did_load_mappings = 1
 endif
@@ -3665,7 +3637,7 @@ augroup VimDoit
 	" event for 'x', 'rx', 'p'
 	" too slow
 	" autocmd CursorMoved *.vdo call s:TextChanged()
-	autocmd BufWritePre *.vdo call s:ProcessFile() 
+	autocmd BufWritePre *.vdo call s:ProcessFile('all')
 augroup END
 
 " open all files
