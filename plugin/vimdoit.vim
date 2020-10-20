@@ -23,11 +23,6 @@ if exists("g:vimdoit_projectsdir") == v:false
 	finish
 endif
 
-" check user option for enabling undo/redo
-if exists("g:vimdoit_undo_enable") == v:false
-	let g:vimdoit_undo_enable = v:true
-endif
-
 " check if necessary tools are installed
 let s:tools = ['diff', 'date', 'dateadd', 'dround', 'grep', 'git', 'sed' ]
 
@@ -52,8 +47,6 @@ let s:quickfix_type = 'none'
 let s:changedlines  = []
 let s:syntax_errors = []
 let s:parse_runtype = 'single'
-let s:undo_enable   = v:false
-let s:undo_event    = v:false
 
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 "																Utility Functions													 "
@@ -127,6 +120,7 @@ function! s:SaveLocation()
 endfunction
 
 function! s:RestoreLocation()
+	echom "Restoring location"
 	let loc = s:location_stack[-1]
 	execute "cd ".loc['cwd']
 	call win_gotoid(loc['winnr'])
@@ -193,7 +187,7 @@ function! s:UpdateBufferlist()
 	
 	" load files which are not existing
 	call s:SaveLocation()
-	execute 'args '.g:vimdoit_projectsdir.'/**/*.vdo '.g:vimdoit_projectsdir.'/**/.*.vdo'
+	execute 'args! '.g:vimdoit_projectsdir.'/**/*.vdo '.g:vimdoit_projectsdir.'/**/.*.vdo'
 	call s:RestoreLocation()
 endfunction
 
@@ -1328,7 +1322,8 @@ endfunction
 " - [ ] check for valid id
 " - [ ] check for valid
 
-function! s:CheckSyntaxSingle(line, linenu)
+" Does not use the global syntax list `s:syntax_errors`
+function! s:CheckSyntaxSingle(line, linenum)
 	
 	" remove everything between ``
 	let line = substitute(a:line, '\v`[^`]{-}`', '', 'g')
@@ -1377,7 +1372,8 @@ function! s:CheckSyntaxSingle(line, linenu)
 
 endfunction
 
-function! s:CheckSyntax(line, linenum)
+" Does use the global syntax list `s:syntax_errors`
+function! s:CheckSyntaxGlobal(line, linenum)
 	
 	" remove everything between ``
 	let line = substitute(a:line, '\v`[^`]{-}`', '', 'g')
@@ -1507,7 +1503,7 @@ function! s:ParseFile()
 		
 		" is line a Task?	
 		if s:IsLineTask(l:line) == v:true
-			call s:CheckSyntax(l:line, l:i)
+			call s:CheckSyntaxGlobal(l:line, l:i)
 			let l:task = s:ExtractTaskData(l:line)
 			let l:task = extend(l:task, { 'linenum': l:i, 'line': l:line })
 			call s:DataAddTask(l:task)
@@ -1517,7 +1513,7 @@ function! s:ParseFile()
 		
 		" is line a Note?	
 		if s:IsLineNote(l:line) == v:true
-			call s:CheckSyntax(l:line, l:i)
+			call s:CheckSyntaxGlobal(l:line, l:i)
 			let l:note = s:ExtractNoteData(l:line)
 			let l:note = extend(l:note, { 'linenum': l:i })
 			call s:DataAddNote(l:note)
@@ -1885,7 +1881,7 @@ function! s:NicenQfByDate(qf)
 	while idx < len(a:qf)
 
 		let date = s:ExtractDate(a:qf[idx].text)
-		" TODO remove #cur
+		" TODO remove
 		" CHECK: syntax where the date is placed! Otherwise the following will
 		" throw errors
 		if empty(date) == v:true
@@ -2809,15 +2805,15 @@ function! s:RemoveTaskPrompt(type)
 	endif
 	
 	if char ==# 'a'
-		call s:RemoveTaskDate(lines)
+		call s:RemoveTaskDate(lines) | execute "normal i\<esc>"
 	elseif char ==# 'm'
-		call s:RemoveTaskTime(lines)
+		call s:RemoveTaskTime(lines) | execute "normal i\<esc>"
 	elseif char ==# 'w'
-		call s:RemoveTaskWaiting(lines)
+		call s:RemoveTaskWaiting(lines) | execute "normal i\<esc>"
 	elseif char ==# 'b'
-		call s:RemoveTaskBlocking(lines)
+		call s:RemoveTaskBlocking(lines) | execute "normal i\<esc>"
 	elseif char ==# 'i'
-		call s:RemoveTaskId(lines)
+		call s:RemoveTaskId(lines) | execute "normal i\<esc>"
 	endif
 endfunction
 
@@ -2834,23 +2830,23 @@ function! s:ChangeTaskPrompt(type)
 	endif
 	
 	if char ==# 'd'
-		call s:ModifyTaskStatus('done', lines)
+		call s:ModifyTaskStatus('done', lines) | execute "normal i\<esc>"
 	elseif char ==# 't'
-		call s:ModifyTaskStatus('todo', lines)
+		call s:ModifyTaskStatus('todo', lines) | execute "normal i\<esc>"
 	elseif char ==# 'f'
-		call s:ModifyTaskStatus('failed', lines)
+		call s:ModifyTaskStatus('failed', lines) | execute "normal i\<esc>"
 	elseif char ==# 'c'
-		call s:ModifyTaskStatus('cancelled', lines)
+		call s:ModifyTaskStatus('cancelled', lines) | execute "normal i\<esc>"
 	elseif char ==# 'p'
-		call s:ModifyTaskPriority(lines)
+		call s:ModifyTaskPriority(lines) | execute "normal i\<esc>"
 	elseif char ==# 'a'
-		call s:ModifyTaskDate(lines)
+		call s:ModifyTaskDate(lines) | execute "normal i\<esc>"
 	elseif char ==# 'm'
-		call s:ModifyTaskTime(lines)
+		call s:ModifyTaskTime(lines) | execute "normal i\<esc>"
 	elseif char ==# 'i'
-		call s:ModifyTaskAction(lines)
+		call s:ModifyTaskAction(lines) | execute "normal i\<esc>"
 	elseif char ==# 'y'
-		call s:ModifyTaskType(lines)
+		call s:ModifyTaskType(lines) | execute "normal i\<esc>"
 	endif
 endfunction
 
@@ -2867,11 +2863,11 @@ function! s:AddTaskPrompt(type)
 	endif
 	
 	if char ==# 'i'
-		call s:AddTaskAction(lines)
+		call s:AddTaskAction(lines) | execute "normal i\<esc>"
 	elseif char ==# 'w'
-		call s:AddTaskWaiting(lines)
+		call s:AddTaskWaiting(lines) | execute "normal i\<esc>"
 	elseif char ==# 'b'
-		call s:AddTaskBlocking(lines)
+		call s:AddTaskBlocking(lines) | execute "normal i\<esc>"
 	endif
 endfunction
 
@@ -3063,8 +3059,6 @@ function! s:UpdateReferences(lines)
 		" both base and extended ids
 		execute 'silent! bufdo global/\v<0x'.id.'(\s|$)/call s:ReplaceLineWithTask(task, line("."))'
 	endfor
-	" save changed buffers
-	execute 'silent! bufdo update'
 	" restore original location
 	call s:RestoreLocation()
 endfunction
@@ -3163,6 +3157,7 @@ function! s:UpdateDates(lines)
 		if empty(task['repetition']) == v:true
 			continue
 		endif
+
 		" generate list of dates from repetition
 		let dates = s:GenerateDatesFromRepetition(task)
 		" update references of auto-generated tasks in arglist
@@ -3171,8 +3166,6 @@ function! s:UpdateDates(lines)
 		call s:UpdateDatefile(datefile, task, dates)
 	endfor
 
-	" save changes
-	execute 'silent! bufdo update'
 	" restore location
 	call s:RestoreLocation()
 endfunction
@@ -3218,27 +3211,64 @@ function! s:DeleteFromDatefile(id)
 	call s:RestoreLocation()
 endfunction
 
-" deletes all parent-less auto-generated dates with `id`
-function! s:CheckDeletionFromDatefile(id)
-	
-	" skip if there is not a datefile
+function! s:UpdateChangedDates(changes)
+	" abort, if there is not a datefile
 	if filereadable(s:GetDatefileName()) == v:false
 		return
 	endif
-
-	" save location
-	call s:SaveLocation()
-	" edit datefile
-	execute "edit! ".s:GetDatefileName()
 	
-	if s:GetNumOccurences('\v<0x'.a:id.'>(\s|$)') == 0
-		" note: the following pattern is ok and won't delete tasks in regular files,
-		" because we are not using `bufdo global`
-		execute 'silent! global/\v<0x'.a:id.'\|\d+(\s|$)/delete'
+	let changed = s:GetLinesOfDiskfile(a:changes)
+	" check if changed lines had a repetition before the change, update datefile accordingly
+		for line in changed
+			" check if the changed line does still have a repetition
+			let rep_1 = s:ExtractRepetition(getline(line['lnum']))
+			if empty(rep_1) == v:false
+				" yes
+				continue
+			endif
+			" check if the old line has a repetition
+			let rep_2 = s:ExtractRepetition(line['line'])
+			if empty(rep_2) == v:false
+				" yes, delete
+				call s:DeleteFromDatefile(s:ExtractId(line['line']))
+			endif
+		endfor
+	
+endfunction
+
+function! s:UpdateDeletedDates(deletions)
+	" abort, if there is not a datefile
+	if filereadable(s:GetDatefileName()) == v:false
+		return
 	endif
 	
-	" restore location
-	call s:RestoreLocation()
+	" get deleted lines from the file before the change
+	let deleted = s:GetLinesOfDiskfile(a:deletions)
+	" get deleted lines
+	for line in deleted
+		" check if the deleted line has a repetition
+		let rep = s:ExtractRepetition(line['line'])
+		if empty(rep) == v:false
+			" yes, check auto-generated dates for deletion:
+
+			" save location
+			call s:SaveLocation()
+			" edit datefile
+			execute "edit! ".s:GetDatefileName()
+			" get id
+			let id = s:ExtractId(line['line'])
+			" delete all parent-less auto-generated dates with `id`
+			if s:GetNumOccurences('\v<0x'.id.'>(\s|$)') == 0
+				" note: the following pattern is ok and won't delete tasks in regular files,
+				" because we are not using `bufdo global`
+				execute 'silent! global/\v<0x'.id.'\|\d+(\s|$)/delete'
+			endif
+			
+			" restore location
+			call s:RestoreLocation()
+			
+		endif
+	endfor
 endfunction
 
 " remove all auto-generated dates where there is no parent anymore
@@ -3419,7 +3449,7 @@ function! s:ValidateId(lines)
 	endfor
 endfunction
 
-function! s:ValidateRebuilt(lines)
+function! s:RebuiltLine(lines)
 	for lnum in a:lines
 		let line = getline(lnum)
 		let item = s:ExtractLineData(line)
@@ -3427,58 +3457,45 @@ function! s:ValidateRebuilt(lines)
 	endfor
 endfunction
 
-function! s:ValidateChanges(changes)
-	echom "Validating changes."
+function! s:ProcessChanges(changes)
+	echom "Process changes."
 	" syntax check
 	call s:ValidateSyntax(a:changes)
 	" id check
 	call s:ValidateId(a:changes)
 	" re-build line
-	call s:ValidateRebuilt(a:changes)
+	call s:RebuiltLine(a:changes)
 	" update references
 	call s:UpdateReferences(a:changes)
 	" update dates
 	call s:UpdateDates(a:changes)
+	" check if changed lines had a repetition before the change, update datefile accordingly
+	call s:UpdateChangedDates(a:changes)
 endfunction
 
-function! s:ValidateInsertions(insertions)
-	echom "Validating insertions."
+function! s:ProcessInsertions(insertions)
+	echom "Process insertions."
 	" syntax check
 	call s:ValidateSyntax(a:insertions)
 	" id check
 	call s:ValidateId(a:insertions)
 	" re-build line
-	call s:ValidateRebuilt(a:insertions)
+	call s:RebuiltLine(a:insertions)
 	" update references
 	call s:UpdateReferences(a:insertions)
 	" update dates
 	call s:UpdateDates(a:insertions)
 endfunction
-function! s:ValidateDeletions(deletions)
-	echom "Validating deletions."
+
+function! s:ProcessDeletions(deletions)
+	echom "Process deletions."
+	" check if deleted lines have a repetition, update datefile accordingly
+	call s:UpdateDeletedDates(a:deletions)
 endfunction
 
-function! s:TextChangedWrapper()
-	try
-		undojoin | call s:TextChanged()
-	catch /^Vim\%((\a\+)\)\=:E790/
-		" execute 'normal! g-'
-		" execute 'normal! g-'
-		undo 
-		undo
-		" call s:TextChanged()
-	endtry
-endfunction
-
+command! -nargs=0 Change	:call s:TextChanged()
 function! s:TextChanged()
 
-	" abort if the text changed due to an undo/redo
-	if s:undo_event == v:true
-		let s:undo_event = v:false
-		echom "Abort TextChanged() due to s:undo_event!"
-		return
-	endif
-	
 	" skip if datefile
 	if s:IsDateFile() == v:true | return | endif
 	" get diff
@@ -3492,69 +3509,32 @@ function! s:TextChanged()
 	endif
 	" reset matches set by previous syntax checks
 	match none
-	" update buffer list
-	call s:UpdateBufferlist()
-	
+
 	try 
 
 		if len(changes['insertions']) > 0
-			call s:ValidateInsertions(changes['insertions'])
+			call s:ProcessInsertions(changes['insertions'])
 		endif
 		
 		if len(changes['deletions']) > 0
-			let deleted = s:GetLinesOfDiskfile(changes['deletions'])
-			call s:ValidateDeletions(changes['deletions'])
+			call s:ProcessDeletions(changes['deletions'])
 		endif
 		
 		if len(changes['changes']) > 0
-			let changed = s:GetLinesOfDiskfile(changes['changes'])
-			call s:ValidateChanges(changes['changes'])
+			call s:ProcessChanges(changes['changes'])
 		endif
 		
-		" check if deleted lines have a repetition, update datefile accordingly
-		if len(changes['deletions']) > 0 
-			" get deleted lines
-			for line in deleted
-				" check if the deleted line has a repetition
-				let rep = s:ExtractRepetition(line['line'])
-				if empty(rep) == v:false
-					" yes, check auto-generated dates for deletion
-					call s:CheckDeletionFromDatefile(s:ExtractId(line['line']))
-				endif
-			endfor
-		endif
-		
-		" check if changed lines had a repetition before the change,
-		" update datefile accordingly
-		if len(changes['changes']) > 0
-			for line in changed
-				" check if the changed line does still have a repetition
-				let rep_1 = s:ExtractRepetition(getline(line['lnum']))
-				if empty(rep_1) == v:false
-					echom "skipping because current line still has a repetition."
-					" yes
-					continue
-				endif
-				" check if the old line has a repetition
-				let rep_2 = s:ExtractRepetition(line['line'])
-				if empty(rep_2) == v:false
-					" yes, delete
-					call s:DeleteFromDatefile(s:ExtractId(line['line']))
-				endif
-			endfor
-		endif
-
 		call s:UpdateFirstLineOfDateFile()
 		" call s:ParseFile()
 		" call s:DataComputeProgress()
 		" call s:DrawSectionOverview()
 		" call s:DrawProjectStatistics()
-		silent update
-		echom "Writing file. Done."
+
+		" write changes
+		wall
 		
-		if s:undo_enable == v:true && g:vimdoit_undo_enable == v:true
-			call s:Commit()
-		endif
+		" update buffer list
+		call s:UpdateBufferlist()
 		
 	catch /syntax-error/
 		" highlight syntax errors
@@ -3570,139 +3550,6 @@ function! s:TextChanged()
 	endtry
 	
 endfunction
-
-"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-"                              Undo/Redo                                "
-"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-
-let s:git_commits = []
-let s:git_undo    = []
-let s:git_master  = 'master' " main branch to use
-
-function! s:InitUndo()
-
-	if g:vimdoit_undo_enable == v:false
-		return
-	endif
-	
-	let cur = s:GetCurrentBranch()
-	
-	if cur ==# s:git_master
-		echom "Init undo"
-		let s:undo_enable = v:true
-		silent call system('git checkout -b undo')
-	endif
-
-	call s:StackPush(s:git_commits, s:GetCurrentHash())
-	call s:CleanCommits(s:git_undo)
-	call s:StackFree(s:git_undo)
-endfunction
-
-function! s:Commit()
-	echom "Commiting changes"
-	silent call trim(system('git add --update'))
-	silent call trim(system('git add ./*'))
-	silent call trim(system('git commit -m '.shellescape(system('date +%s%N'))))
-	call s:StackPush(s:git_commits, s:GetCurrentHash())
-	call s:CleanCommits(s:git_undo)
-	call s:StackFree(s:git_undo)
-endfunction
-
-function! s:CleanCommits(list)
-	for i in a:list
-		call filter(s:git_commits, 'v:val != "'.i.'"')
-	endfor
-endfunction
-
-function! s:GetCurrentHash()
-	return trim(system('git log --pretty=format:"%H" -n 1'))
-endfunction
-
-function! s:GetCurrentBranch()
-	return trim(system('git rev-parse --abbrev-ref HEAD'))
-endfunction
-
-function! s:DoesBranchExist(branchname)
-	if trim(system('git branch | grep '.shellescape(a:branchname).' | wc -l')) ==# '0'
-		return v:false
-	else
-		return v:true
-	endif
-endfunction
-
-" command! -nargs=0 CleanupUndo	:call s:CleanupUndo()
-function! s:CleanupUndo()	
-	
-	if s:undo_enable == v:false
-		return
-	endif
-	
-	echom "Cleaning up undo…"
-	silent call system('git checkout -b tmp')
-	silent call system('git branch --force '.s:git_master.' tmp')
-	silent call system('git checkout '.s:git_master)
-	silent call system('git branch -D tmp')
-	silent call system('git branch -D undo')
-	sleep 5
-endfunction
-
-" command! -nargs=0 VdoRedo	:call s:Redo()
-" BROKEN: do not use!
-function! s:Undo()
-	echom "Undoing"
-	if s:StackLen(s:git_commits) <= 1
-		echom "No previous changes"
-		return
-	endif
-		
-	let s:undo_event = v:true
-	call s:StackPush(s:git_undo, s:StackPop(s:git_commits))
-	silent call system('git checkout '.s:StackTop(s:git_commits))
-
-	" call s:SaveLocation()
-	" edit!
-	echom "sleeping"
-	sleep 2 
-	echom "reloading"
-	checktime
-	edit!
-	" call s:RestoreLocation()
-endfunction
-
-" BROKEN: do not use!
-function! s:Redo()
-	echom "Redoing"
-	
-	if s:StackEmpty(s:git_undo) == v:true
-		echom "Already at newest change"
-		return
-	endif
-	
-	let s:undo_event = v:true
-	call s:StackPush(s:git_commits, s:StackPop(s:git_undo))
-	silent call system('git checkout '.s:StackTop(s:git_commits))
-	" call s:SaveLocation()
-	" edit!
-	echom "sleeping"
-	sleep 2 
-	echom "reloading"
-	checktime
-	edit!
-	" call s:RestoreLocation()
-endfunction
-command! -nargs=0 VdoUndo	:call s:Undo()
-
-function! s:PrintStacks()
-	echom "-------------"
-	echom "Stack commit:"
-	echom s:git_commits
-	echom "Stack undo:"
-	echom s:git_undo
-endfunction
-command! -nargs=0 VdoStack	:call s:PrintStacks()
-
-" init
-call s:InitUndo()
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 "                               Mappings                                "
@@ -3739,15 +3586,13 @@ if exists("g:vimdoit_did_load_mappings") == v:false
 		nnoremap <leader>qj	:<c-u>call <SID>JumpToToday()<cr>
 		" Yank Task Prompt (Normal)
 		nnoremap Y	:<c-u>call <SID>YankTaskPrompt()<cr>
-		" Remap undo/redo to custom `Redo()` function
-		nnoremap g+ :<c-u>call <SID>Redo()<cr>
-		nnoremap U  :<c-u>call <SID>Redo()<cr>
-		nnoremap g- :<c-u>call <SID>Undo()<cr>
-		nnoremap u  :<c-u>call <SID>Undo()<cr>
-		nnoremap g+ <nop>
-		nnoremap U  <nop>
-		nnoremap g- <nop>
-		nnoremap u  <nop>
+		
+		" re-mappings triggering InsertLeave event
+		nnoremap D	Di<esc>
+		nnoremap dd ddi<esc>
+		nnoremap - ddi<esc>
+		nnoremap D Di<esc>
+		
 		let g:vimdoit_did_load_mappings = 1
 endif
 
@@ -3758,8 +3603,9 @@ endif
 augroup VimDoit
 	autocmd!
 	autocmd ShellCmdPost * call s:UpdateBufferlist()
-	autocmd TextChanged *.vdo call s:TextChanged()
-	autocmd VimLeave *.vdo call s:CleanupUndo()
+	autocmd InsertLeave *.vdo call s:TextChanged()
+	" event for 'x', 'rx', 'p'
+	autocmd CursorMoved *.vdo call s:TextChanged()
 augroup END
 
 " open all files
