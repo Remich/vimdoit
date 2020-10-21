@@ -53,7 +53,7 @@ let s:changedlines  = []
 let s:syntax_errors = []
 let s:parse_runtype = 'single'
 let s:undo_enable   = v:false
-let s:undo_event    = v:false
+let b:undo_event    = v:false
 
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 "																Utility Functions													 "
@@ -81,6 +81,10 @@ endfunction
 
 function! s:StackTop(list)
 	return a:list[-1]
+endfunction
+
+function! s:StackBottom(list)
+	return a:list[0]
 endfunction
 
 function! s:StackLen(list)
@@ -179,12 +183,31 @@ function! s:RestoreBuffers(buffers)
 	endfor
 endfunction
 
+function! s:InitBufferlist()
+	echom "Initializing buffer list"
+	call s:SaveLocation()
+	execute 'argadd '.g:vimdoit_projectsdir.'/**/*.vdo '.g:vimdoit_projectsdir.'/**/.*.vdo'
+	silent argdo silent call s:InitUndo()
+	call s:RestoreLocation()
+	echom "Initializing finished, vimdoit ready"
+endfunction
+
 " afer running `mv`, `rm`, `cp`, etc. we have to make sure 
 " that the bufferlist is always up to date
 function! s:UpdateBufferlist()
 	" unload buffers where the corresponding file doesn't exist anymore
 	let buffers = getbufinfo({'buflisted':1})	 
+	
 	for b in buffers
+		" no undo files
+		" TODO maybe remove?
+		" echom "fullpath: ".expand('#'.b['bufnr'].':p')
+		" if expand('#'.b['bufnr'].':p') =~# '\v\.undo\/'
+		" 	echom "wiping buffer :".bufname(b['bufnr'])
+		" 	execute "bwipeout!".b['bufnr']
+		" endif
+
+		" wipe not existing files
 		if filereadable(bufname(b['bufnr'])) == v:false
 			echom "wiping buffer :".bufname(b['bufnr'])
 			execute "bwipeout!".b['bufnr']
@@ -1541,6 +1564,12 @@ function! s:IsDateFile()
 	" check if this is a datefile
 	let basename = expand('%:t:r')
 	return basename =~# '\v\..*-date'
+endfunction
+
+function! s:IsUndoFile()
+	" check if this is a datefile
+	let basename = expand('%:p')
+	return basename =~# '\v.*\.undo\/'
 endfunction
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -3063,8 +3092,6 @@ function! s:UpdateReferences(lines)
 		" both base and extended ids
 		execute 'silent! bufdo global/\v<0x'.id.'(\s|$)/call s:ReplaceLineWithTask(task, line("."))'
 	endfor
-	" save changed buffers
-	execute 'silent! bufdo update'
 	" restore original location
 	call s:RestoreLocation()
 endfunction
@@ -3171,8 +3198,6 @@ function! s:UpdateDates(lines)
 		call s:UpdateDatefile(datefile, task, dates)
 	endfor
 
-	" save changes
-	execute 'silent! bufdo update'
 	" restore location
 	call s:RestoreLocation()
 endfunction
@@ -3370,7 +3395,7 @@ function! s:GetDiff()
 endfunction
 
 function! s:GetLinesOfDiskfile(lines)
-	echom "Reading lines from file from disk"
+	echom "Reading lines from disk"
 	let read = []
 	for i in a:lines
 		call add(read, {'lnum': i, 'line': trim(system('sed -n '.i.'p '.expand('%')))})
@@ -3471,16 +3496,30 @@ function! s:TextChangedWrapper()
 endfunction
 
 function! s:TextChanged()
+	" echom "Event: TextChanged in buffer ".bufname(bufnr())
+	
+	if b:undo_event == v:true
+		let b:undo_event = v:false
+		return
+	endif
 
-	" abort if the text changed due to an undo/redo
-	if s:undo_event == v:true
-		let s:undo_event = v:false
-		echom "Abort TextChanged() due to s:undo_event!"
+	if exists('b:text_changed_event') == v:true && b:text_changed_event == v:true
+		echom "Abort due to b:text_changed_event"
+		let b:text_changed_event = v:false
 		return
 	endif
 	
-	" skip if datefile
-	if s:IsDateFile() == v:true | return | endif
+	" check if datefile
+	if s:IsDateFile() == v:true
+		echom "Pushing from datefile.."
+		" only save undo file
+		silent write
+		call s:SaveUndo(bufnr())
+		call s:StackPush(s:undo_stack, [bufnr()])
+		" skip
+		return
+	endif
+	
 	" get diff
 	let changes = s:GetDiff()
 	" check if there is anything to do
@@ -3488,12 +3527,11 @@ function! s:TextChanged()
 				\ && len(changes['deletions']) == 0
 				\ && len(changes['changes']) == 0
 		" nothing to do
+		echom "return, nothing to do"
 		return
 	endif
 	" reset matches set by previous syntax checks
 	match none
-	" update buffer list
-	call s:UpdateBufferlist()
 	
 	try 
 
@@ -3549,12 +3587,14 @@ function! s:TextChanged()
 		" call s:DataComputeProgress()
 		" call s:DrawSectionOverview()
 		" call s:DrawProjectStatistics()
-		silent update
+
+		" get list of changed buffers
+		let buffers = deepcopy(getbufinfo({'buflisted':1, 'bufmodified':1}))
+		" write all changed buffers
+		silent wall
+		" save undo-files of changed buffers
+		call s:UpdateUndoFiles(buffers)
 		echom "Writing file. Done."
-		
-		if s:undo_enable == v:true && g:vimdoit_undo_enable == v:true
-			call s:Commit()
-		endif
 		
 	catch /syntax-error/
 		" highlight syntax errors
@@ -3569,140 +3609,192 @@ function! s:TextChanged()
 		echoerr v:exception." in ".v:throwpoint
 	endtry
 	
+	" update buffer list
+	call s:UpdateBufferlist()
+	
 endfunction
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 "                              Undo/Redo                                "
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
-let s:git_commits = []
-let s:git_undo    = []
-let s:git_master  = 'master' " main branch to use
+let s:undo_dir  = '.undo'
+let s:undo_stack = []
+let s:redo_stack = []
 
 function! s:InitUndo()
 
-	if g:vimdoit_undo_enable == v:false
+	" check if this is a undo file
+	if s:IsUndoFile() == v:true
 		return
 	endif
 	
-	let cur = s:GetCurrentBranch()
-	
-	if cur ==# s:git_master
-		echom "Init undo"
-		let s:undo_enable = v:true
-		silent call system('git checkout -b undo')
+	if exists('b:undo_pointer') == v:true
+		return
+	else
+		echom "Init undo in ".bufname(bufnr())
+		let b:undo_pointer = -1
+		call s:SaveUndo(bufnr())
+
+		if s:StackLen(s:undo_stack) == 0
+			call s:StackPush(s:undo_stack, [bufnr()])
+		else
+			call extend(s:StackBottom(s:undo_stack), [bufnr()])
+		endif
+		
+		let b:undo_event = v:false
+	endif
+endfunction
+
+function! s:FormatPointer(ptr)
+	return trim(system('printf "%04d" '.a:ptr))
+endfunction
+
+function! s:GetFilename(pointer)
+	return expand('%:p:h').'/.undo/'.s:FormatPointer(a:pointer).'-'.expand('%:t')
+endfunction
+
+function! s:CheckExistenceUndoDir()
+	let dirname = expand('%:p:h')	.'/.undo/'
+	if isdirectory(dirname) == v:false
+		call system('mkdir '.dirname)
+	endif
+endfunction
+
+function! s:UpdateUndoFiles(buffers)
+
+	" push modified buffers onto `s:undo_stack`
+	if b:undo_event == v:false
+		let mod = []
+		for b in a:buffers
+			call add(mod, b['bufnr'])
+			if b['bufnr'] != bufnr()
+				call setbufvar(b['bufnr'], "text_changed_event", v:true)
+			endif
+		endfor
+		call s:StackPush(s:undo_stack, mod)
 	endif
 
-	call s:StackPush(s:git_commits, s:GetCurrentHash())
-	call s:CleanCommits(s:git_undo)
-	call s:StackFree(s:git_undo)
-endfunction
-
-function! s:Commit()
-	echom "Commiting changes"
-	silent call trim(system('git add --update'))
-	silent call trim(system('git add ./*'))
-	silent call trim(system('git commit -m '.shellescape(system('date +%s%N'))))
-	call s:StackPush(s:git_commits, s:GetCurrentHash())
-	call s:CleanCommits(s:git_undo)
-	call s:StackFree(s:git_undo)
-endfunction
-
-function! s:CleanCommits(list)
-	for i in a:list
-		call filter(s:git_commits, 'v:val != "'.i.'"')
+	" save undo-files of modified buffers
+	for b in a:buffers
+		echom "Trying to save ".bufname(b['bufnr'])
+		call s:SaveUndo(b['bufnr'])
 	endfor
 endfunction
 
-function! s:GetCurrentHash()
-	return trim(system('git log --pretty=format:"%H" -n 1'))
-endfunction
+function! s:SaveUndo(bufnr)
 
-function! s:GetCurrentBranch()
-	return trim(system('git rev-parse --abbrev-ref HEAD'))
-endfunction
+	echom "Saving undo of ".bufname(a:bufnr)
 
-function! s:DoesBranchExist(branchname)
-	if trim(system('git branch | grep '.shellescape(a:branchname).' | wc -l')) ==# '0'
-		return v:false
-	else
-		return v:true
+	if exists('b:undo_event') == v:false
+		let b:undo_event = v:false
 	endif
-endfunction
 
-" command! -nargs=0 CleanupUndo	:call s:CleanupUndo()
-function! s:CleanupUndo()	
-	
-	if s:undo_enable == v:false
-		return
-	endif
-	
-	echom "Cleaning up undo…"
-	silent call system('git checkout -b tmp')
-	silent call system('git branch --force '.s:git_master.' tmp')
-	silent call system('git checkout '.s:git_master)
-	silent call system('git branch -D tmp')
-	silent call system('git branch -D undo')
-	sleep 5
-endfunction
-
-" command! -nargs=0 VdoRedo	:call s:Redo()
-" BROKEN: do not use!
-function! s:Undo()
-	echom "Undoing"
-	if s:StackLen(s:git_commits) <= 1
-		echom "No previous changes"
+	if b:undo_event == v:true
+		let b:undo_event = v:false
 		return
 	endif
 		
-	let s:undo_event = v:true
-	call s:StackPush(s:git_undo, s:StackPop(s:git_commits))
-	silent call system('git checkout '.s:StackTop(s:git_commits))
+	call s:SaveLocation()
+	execute "buffer ".a:bufnr
+	
+	call s:CheckExistenceUndoDir()
 
-	" call s:SaveLocation()
-	" edit!
-	echom "sleeping"
-	sleep 2 
-	echom "reloading"
-	checktime
-	edit!
-	" call s:RestoreLocation()
+	let file           = s:GetFilename(b:undo_pointer + 1)
+	let b:undo_pointer = b:undo_pointer + 1
+	" reset redo_list
+	let s:redo_stack    = []
+	echom "Saving undo-file of buffer ".bufname(a:bufnr)
+	call system('cp '.expand('%').' '.file)
+
+	call s:RestoreLocation()
 endfunction
 
-" BROKEN: do not use!
-function! s:Redo()
-	echom "Redoing"
+function! s:DeleteUndofiles()	
+	echom "Deleting undo-files"
+	execute 'args '.g:vimdoit_projectsdir.'/**/.undo/*.vdo'
+	silent argdo !rm %
+endfunction
+
+command! -nargs=0 VdoUndo	:call s:Undo()
+function! s:Undo()
+	echom "Undoing"
 	
-	if s:StackEmpty(s:git_undo) == v:true
+	if b:undo_pointer == 0 || s:StackLen(s:undo_stack) == 0
+		echom "Already at oldest change"
+		return
+	endif
+
+	call s:SaveLocation()
+	
+	let buffers = s:StackPop(s:undo_stack)
+	call s:StackPush(s:redo_stack, buffers)
+	
+	for bufnr in buffers
+		execute "buffer ".bufnr
+
+		let file = s:GetFilename(b:undo_pointer - 1)
+		
+		if filereadable(file) == v:false
+			echoerr "Undo file ".file." not found!"
+			return
+		endif
+
+		silent execute ':%!cat '.file
+		let b:undo_pointer = b:undo_pointer - 1
+		let b:undo_event   = v:true
+	endfor
+
+	silent wall
+	call s:RestoreLocation()
+
+endfunction
+
+" command! -nargs=0 VdoRedo	:call s:Redo()
+function! s:Redo()
+
+	echom "Redoing"
+
+	if s:StackLen(s:redo_stack) == 0
 		echom "Already at newest change"
 		return
 	endif
+
+	call s:SaveLocation()
+	let buffers = s:StackPop(s:redo_stack)
+	call s:StackPush(s:undo_stack, buffers)
 	
-	let s:undo_event = v:true
-	call s:StackPush(s:git_commits, s:StackPop(s:git_undo))
-	silent call system('git checkout '.s:StackTop(s:git_commits))
-	" call s:SaveLocation()
-	" edit!
-	echom "sleeping"
-	sleep 2 
-	echom "reloading"
-	checktime
-	edit!
-	" call s:RestoreLocation()
+	for bufnr in buffers
+		execute "buffer ".bufnr
+
+		let file = s:GetFilename(b:undo_pointer + 1)
+		
+		if filereadable(file) == v:false
+			echoerr "Undo file ".file." not found!"
+			return
+		endif
+
+		silent execute ':%!cat '.file
+		let b:undo_pointer = b:undo_pointer + 1
+		let b:undo_event   = v:true
+	endfor
+	
+	silent wall
+	call s:RestoreLocation()
+
 endfunction
-command! -nargs=0 VdoUndo	:call s:Undo()
 
 function! s:PrintStacks()
 	echom "-------------"
-	echom "Stack commit:"
-	echom s:git_commits
-	echom "Stack undo:"
-	echom s:git_undo
+	echom "Undo List:"
+	echom s:undo_stack
+	echom "Redot List:"
+	echom s:redo_stack
+	echom "Undo Pointer:"
+	echom b:undo_pointer
 endfunction
 command! -nargs=0 VdoStack	:call s:PrintStacks()
 
-" init
-call s:InitUndo()
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 "                               Mappings                                "
@@ -3744,10 +3836,10 @@ if exists("g:vimdoit_did_load_mappings") == v:false
 		nnoremap U  :<c-u>call <SID>Redo()<cr>
 		nnoremap g- :<c-u>call <SID>Undo()<cr>
 		nnoremap u  :<c-u>call <SID>Undo()<cr>
-		nnoremap g+ <nop>
-		nnoremap U  <nop>
-		nnoremap g- <nop>
-		nnoremap u  <nop>
+		" nnoremap g+ <nop>
+		" nnoremap U  <nop>
+		" nnoremap g- <nop>
+		" nnoremap u  <nop>
 		let g:vimdoit_did_load_mappings = 1
 endif
 
@@ -3759,12 +3851,15 @@ augroup VimDoit
 	autocmd!
 	autocmd ShellCmdPost * call s:UpdateBufferlist()
 	autocmd TextChanged *.vdo call s:TextChanged()
-	autocmd VimLeave *.vdo call s:CleanupUndo()
-augroup END
+	autocmd VimLeave *.vdo call s:DeleteUndofiles()
+	autocmd BufEnter *.vdo call s:InitUndo()
 
-" open all files
-execute 'argadd '.g:vimdoit_projectsdir.'/**/*.vdo '.g:vimdoit_projectsdir.'/**/.*.vdo'
-" argadd ./inbox.vdo
+	if v:vim_did_enter
+		call s:InitBufferlist()
+	else
+		autocmd VimEnter * call s:InitBufferlist()
+	endif
+augroup END
 
 " Restore user's options.
 let &cpo = s:save_cpo
