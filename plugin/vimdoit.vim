@@ -52,7 +52,6 @@ let s:quickfix_type = 'none'
 let s:changedlines  = []
 let s:syntax_errors = []
 let s:parse_runtype = 'single'
-let s:undo_enable   = v:false
 let b:undo_event    = v:false
 
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -1320,7 +1319,7 @@ function! s:ExtractNoteData(line)
 endfunction
 
 function! s:ErrorLine(linenum)
-	execute 'normal '.a:linenum.'gg0'
+	" execute 'normal '.a:linenum.'gg0'
 	execute 'syntax match VdoError "\v%'.a:linenum.'l.*"'
 	highlight link VdoError Error
 endfunction
@@ -1338,6 +1337,7 @@ function! s:SyntaxError(linenum, msg)
 endfunction
 
 " TODO implement syntax check of other attributes
+" TODO split into syntax-check and semantics-check
 " currently implemented:
 " - [x] check: only one date attribute per task/note
 " - [x] check: for anything before the date, except `!` and whitespaces
@@ -1350,54 +1350,10 @@ endfunction
 " - [ ] check for valid block
 " - [ ] check for valid id
 " - [ ] check for valid
+" - [x] check: repetitions can't have an extended-id
 
-function! s:CheckSyntaxSingle(line, linenu)
-	
-	" remove everything between ``
-	let line = substitute(a:line, '\v`[^`]{-}`', '', 'g')
-
-	" check if task/note has a valid indicator (`- …` or `- [ ]`)
-	if line =~# '\v^\s*-\zs[^ -]\ze(\[.\])?'
-		return 'Invalid task/note indicator (`- …` or `- [ ]`). Maybe you used tabs instead of spaces?'
-	endif
-
-	" extract date attributes
-	let date_attributes = s:ExtractDateAttributes(line)
-	
-	" check if the task has multiple date-attributes (`{...}´)
-	if len(date_attributes) > 1
-		return "Multiple dates."
-	" check if task has a date or repetition
-	elseif len(date_attributes) == 1
-		let pass = v:false
-		
-		" remove task/note indicator
-		let line2 = substitute(line, '\v('.s:pat_task.'|'.s:pat_note.')', '', '')
-		
-		" check for any characters except `!` before the date-attribute
-		" remove all `!` and spaces before date-attribute
-		let line3 = substitute(line2, '\v(!|\s)', '', 'g')
-		" check
-		if line3 =~# '\v^\zs.+\ze\{.*\}'
-			return "Forbidden characters before the date-attribute. Allowed characters: ! and whitespaces."
-		endif
-
-		" check if it is a valid date
-		let date = date_attributes[0]
-		if date =~# '\v\{\zs('.s:pat_weekday.')?'.s:pat_datetime.'\ze\}'
-			let pass = v:true
-		" check if it is a valid repetition
-		elseif date =~# '\v^\{\zs'.s:pat_datetime.s:pat_rep.'(\|'.s:pat_datetime.')?\ze\}'
-			let pass = v:true
-		endif
-
-		if pass == v:false
-			return 'Invalid date or repetition.'
-		endif
-	endif
-
-	return ''
-
+function! s:HasLineRepetition(line)
+	return empty(s:ExtractRepetition(a:line)) ? v:false : v:true
 endfunction
 
 function! s:CheckSyntax(line, linenum)
@@ -1411,6 +1367,17 @@ function! s:CheckSyntax(line, linenum)
 		return
 	endif
 
+	" check if a repetition does not have an extended id
+	if s:HasLineRepetition(line)
+		let baseid = s:ExtractBaseId(line)
+		let id     = s:ExtractId(line)
+		" baseid and id should now be the same
+		if baseid !=# id
+			call s:SyntaxError(a:linenum, "A repetition can't have an extended id!")
+			return
+		endif
+	endif
+		
 	" extract date attributes
 	let date_attributes = s:ExtractDateAttributes(line)
 	
@@ -3072,8 +3039,8 @@ endfunction
 "                             References                                "
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
-function! s:UpdateReferences(lines)
-	echom "Updating references."
+function! s:PropagateReferences(lines)
+	echom "Propagating references"
 	" save location
 	call s:SaveLocation()
 	for lnum in a:lines
@@ -3166,8 +3133,8 @@ function! s:CleanupAllDatefiles()
 endfunction
 command! -nargs=0 VdoCleanDatefiles	:call s:CleanupAllDatefiles()
 
-function! s:UpdateDates(lines)
-	echom "Updating dates."
+function! s:PropagateRepetitions(lines)
+	echom "Propagate repetitions"
 	" skip if datefile
 	if s:IsDateFile() == v:true | return | endif
 	" save location
@@ -3362,6 +3329,68 @@ function! s:GenerateDatesFromRepetition(task)
 	return dates
 endfunction
 
+function! s:PropagateDeletedRepetitions(deletions)
+	echom "Propagating deleted repetitions"
+	" abort, if there is not a datefile
+	if filereadable(s:GetDatefileName()) == v:false
+		return
+	endif
+
+	" get deleted lines from the file before the change
+	let deleted = s:GetLinesOfDiskfile(a:deletions)
+
+	for line in deleted
+		" check if the deleted line has a repetition
+		let rep = s:ExtractRepetition(line['line'])
+		if empty(rep) == v:false
+			" yes, check auto-generated dates for deletion:
+
+			" save location
+			call s:SaveLocation()
+			" edit datefile
+			execute "edit! ".s:GetDatefileName()
+			" get id
+			let id = s:ExtractId(line['line'])
+			" delete all parent-less auto-generated dates with `id`
+			if s:GetNumOccurences('\v<0x'.id.'>(\s|$)') == 0
+				" note: the following pattern is ok and won't delete tasks in regular files,
+				" because we are not using `bufdo global`
+				execute 'silent! global/\v<0x'.id.'\|\d+(\s|$)/delete'
+			endif
+			
+			" restore location
+			call s:RestoreLocation()
+			
+	endfor
+	
+endfunction
+
+function! s:PropagateChangedRepetitions(changes)
+	echom "Propagating changed repetitions"
+	" abort, if there is not a datefile
+	if filereadable(s:GetDatefileName()) == v:false
+		return
+	endif
+	
+	let changed = s:GetLinesOfDiskfile(a:changes)
+	" check if changed lines had a repetition before the change, update datefile accordingly
+		for line in changed
+			" check if the changed line does still have a repetition
+			let rep_1 = s:ExtractRepetition(getline(line['lnum']))
+			if empty(rep_1) == v:false
+				" yes
+				continue
+			endif
+			" check if the old line has a repetition
+			let rep_2 = s:ExtractRepetition(line['line'])
+			if empty(rep_2) == v:false
+				" yes, delete
+				call s:DeleteFromDatefile(s:ExtractId(line['line']))
+			endif
+		endfor
+	
+endfunction
+
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 "                             Validation                                "
@@ -3403,11 +3432,16 @@ function! s:GetLinesOfDiskfile(lines)
 	return read
 endfunction
 
+
 function! s:ValidateSyntax(lines)
+	echom "Validating syntax"
+	let s:syntax_errors = []
 	
-	let s:local_syntax_errors = []
+	" reset matches set by previous syntax checks
+	match none
 	
-	" check if line is task/note
+	" TODO remove, once we also check the syntax of other items
+	" filter not lines/notes
 	for lnum in a:lines
 		let line = getline(lnum)
 		if s:IsLineNote(line) == v:false && s:IsLineTask(line) == v:false
@@ -3418,22 +3452,25 @@ function! s:ValidateSyntax(lines)
 	" syntax check
 	for lnum in a:lines
 		let line = getline(lnum)
-		
-		" check syntax
-		let res = s:CheckSyntaxSingle(line, lnum)
-		if res !=# ''
-			call add(s:local_syntax_errors, { 'msg' : res, 'lnum' : lnum  })
-		endif
+		call s:CheckSyntax(line, lnum)
 	endfor
 
 	" throw possible syntax errors
-	if len(s:local_syntax_errors) > 0
-		throw "syntax-error"
+	if len(s:syntax_errors) > 0
+		call setqflist(s:syntax_errors, 'a')
+		let lines = map(s:syntax_errors, 'v:val["lnum"]')
+		let lines = map(lines, '"%".v:val."l"')
+		let pat   = "(".join(lines, '|').").*$"
+		execute 'match Error "\v'.pat.'"'
+		highlight link VdoError Error
+		echoerr "Syntax errors in ".expand('%').". See error list."
 	endif
 	
 endfunction
 
+
 function! s:ValidateId(lines)
+	echom "Validating id"
 	for lnum in a:lines
 		let line = getline(lnum)
 		let item = s:ExtractLineData(line)
@@ -3444,7 +3481,8 @@ function! s:ValidateId(lines)
 	endfor
 endfunction
 
-function! s:ValidateRebuilt(lines)
+function! s:RebuiltLine(lines)
+	echom "Rebuilding line"
 	for lnum in a:lines
 		let line = getline(lnum)
 		let item = s:ExtractLineData(line)
@@ -3452,57 +3490,103 @@ function! s:ValidateRebuilt(lines)
 	endfor
 endfunction
 
-function! s:ValidateChanges(changes)
-	echom "Validating changes."
+function! s:ProcessChanges(changes)
+	echom "Processing changes"
 	" syntax check
 	call s:ValidateSyntax(a:changes)
 	" id check
 	call s:ValidateId(a:changes)
 	" re-build line
-	call s:ValidateRebuilt(a:changes)
+	call s:RebuiltLine(a:changes)
 	" update references
-	call s:UpdateReferences(a:changes)
+	call s:PropagateReferences(a:changes)
 	" update dates
-	call s:UpdateDates(a:changes)
+	call s:PropagateRepetitions(a:changes)
+	" propagate changed repetitions
+	call s:PropagateChangedRepetitions(a:changes)
 endfunction
 
-function! s:ValidateInsertions(insertions)
-	echom "Validating insertions."
+function! s:ProcessInsertions(insertions)
+	echom "Processing insertions"
 	" syntax check
 	call s:ValidateSyntax(a:insertions)
 	" id check
 	call s:ValidateId(a:insertions)
 	" re-build line
-	call s:ValidateRebuilt(a:insertions)
+	call s:RebuiltLine(a:insertions)
 	" update references
-	call s:UpdateReferences(a:insertions)
+	call s:PropagateReferences(a:insertions)
 	" update dates
-	call s:UpdateDates(a:insertions)
-endfunction
-function! s:ValidateDeletions(deletions)
-	echom "Validating deletions."
+	call s:PropagateRepetitions(a:insertions)
 endfunction
 
-function! s:TextChangedWrapper()
+function! s:ProcessDeletions(deletions)
+	echom "Processing deletions"
+	" propagate deleted repetitions
+	call s:PropagateDeletedRepetitions(a:deletions)
+endfunction
+
+" process every line of the file
+command! ProcessFile :call s:ProcessFile('all')
+function! s:ProcessFile(what)
+	" skip if datefile
+	if s:IsDateFile() == v:true | return | endif
+	
+	" decide which lines should be processed
+	if a:what ==# 'all'
+		" all lines of file
+		let lines = range(1, line('$')) 
+		echom "Processing file ".expand('%')
+	elseif a:what ==# 'visual'
+		" lines of current visual selection
+		let lines = range(line("'<"), line("'>"))
+		echom "Processing line ".join(lines, ',')." of file ".expand('%')
+	elseif a:what ==# 'current'
+		" only current line
+		let lines = [ line('.') ]
+		echom "Processing line ".join(lines, ',')." of file ".expand('%')
+	else
+		echoerr "Unknown argument for `a:what` :".a:what
+	endif
+
+	" TODO remove me
+	echom "Not yet fully implemented. Abort."
+	return
+
 	try
-		undojoin | call s:TextChanged()
-	catch /^Vim\%((\a\+)\)\=:E790/
-		" execute 'normal! g-'
-		" execute 'normal! g-'
-		undo 
-		undo
-		" call s:TextChanged()
+		" syntax check
+		call s:ValidateSyntax(lines)
+		" id check
+		call s:ValidateId(lines)
+		" re-build line
+		call s:RebuiltLine(lines)
+		" delete all auto-generated dates where there is no corresponding repetition #cur
+		" call s:CleanUpRepetitions()
+
+		" for each repetiton #next
+			" delete all corresponding auto-generated dates in datefile 
+			" add auto-generated dates, but not those which exist somewhere in a project (not datefile)
+		" call s:GenerateDates()
+		" 
+		" update first line of datefile
+		call s:UpdateFirstLineOfDateFile()
+	catch /.*/
+		echom v:exception." in ".v:throwpoint
 	endtry
+
 endfunction
 
 function! s:TextChanged()
 	" echom "Event: TextChanged in buffer ".bufname(bufnr())
 	
+	" ignore event, if it was triggered by an undo or redo
 	if b:undo_event == v:true
 		let b:undo_event = v:false
 		return
 	endif
 
+	" ignore event, if we enter a buffer and 
+	" it was previously changed by and undo or redo
 	if exists('b:text_changed_event') == v:true && b:text_changed_event == v:true
 		echom "Abort due to b:text_changed_event"
 		let b:text_changed_event = v:false
@@ -3527,61 +3611,27 @@ function! s:TextChanged()
 				\ && len(changes['deletions']) == 0
 				\ && len(changes['changes']) == 0
 		" nothing to do
-		echom "return, nothing to do"
+		echom "Diff found no changes"
 		return
 	endif
+	
 	" reset matches set by previous syntax checks
 	match none
 	
 	try 
 
 		if len(changes['insertions']) > 0
-			call s:ValidateInsertions(changes['insertions'])
+			call s:ProcessInsertions(changes['insertions'])
 		endif
 		
 		if len(changes['deletions']) > 0
-			let deleted = s:GetLinesOfDiskfile(changes['deletions'])
-			call s:ValidateDeletions(changes['deletions'])
+			call s:ProcessDeletions(changes['deletions'])
 		endif
 		
 		if len(changes['changes']) > 0
-			let changed = s:GetLinesOfDiskfile(changes['changes'])
-			call s:ValidateChanges(changes['changes'])
+			call s:ProcessChanges(changes['changes'])
 		endif
 		
-		" check if deleted lines have a repetition, update datefile accordingly
-		if len(changes['deletions']) > 0 
-			" get deleted lines
-			for line in deleted
-				" check if the deleted line has a repetition
-				let rep = s:ExtractRepetition(line['line'])
-				if empty(rep) == v:false
-					" yes, check auto-generated dates for deletion
-					call s:CheckDeletionFromDatefile(s:ExtractId(line['line']))
-				endif
-			endfor
-		endif
-		
-		" check if changed lines had a repetition before the change,
-		" update datefile accordingly
-		if len(changes['changes']) > 0
-			for line in changed
-				" check if the changed line does still have a repetition
-				let rep_1 = s:ExtractRepetition(getline(line['lnum']))
-				if empty(rep_1) == v:false
-					echom "skipping because current line still has a repetition."
-					" yes
-					continue
-				endif
-				" check if the old line has a repetition
-				let rep_2 = s:ExtractRepetition(line['line'])
-				if empty(rep_2) == v:false
-					" yes, delete
-					call s:DeleteFromDatefile(s:ExtractId(line['line']))
-				endif
-			endfor
-		endif
-
 		call s:UpdateFirstLineOfDateFile()
 		" call s:ParseFile()
 		" call s:DataComputeProgress()
@@ -3596,19 +3646,10 @@ function! s:TextChanged()
 		call s:UpdateUndoFiles(buffers)
 		echom "Writing file. Done."
 		
-	catch /syntax-error/
-		" highlight syntax errors
-		let lines = map(s:local_syntax_errors, 'v:val["lnum"]')
-		let lines = map(lines, '"%".v:val."l"')
-		let pat   = "(".join(lines, '|').").*$"
-		execute 'match Error "\v'.pat.'"'
-		highlight link VdoError Error
-		" display error message
-		echoerr "Syntax errors in line(s) ".join(lines, ', ')
 	catch /.*/
 		echoerr v:exception." in ".v:throwpoint
 	endtry
-	
+		
 	" update buffer list
 	call s:UpdateBufferlist()
 	
@@ -3831,15 +3872,18 @@ if exists("g:vimdoit_did_load_mappings") == v:false
 		nnoremap <leader>qj	:<c-u>call <SID>JumpToToday()<cr>
 		" Yank Task Prompt (Normal)
 		nnoremap Y	:<c-u>call <SID>YankTaskPrompt()<cr>
-		" Remap undo/redo to custom `Redo()` function
+		" Remap undo/redo to re-implementation of undo/redo
 		nnoremap g+ :<c-u>call <SID>Redo()<cr>
 		nnoremap U  :<c-u>call <SID>Redo()<cr>
 		nnoremap g- :<c-u>call <SID>Undo()<cr>
 		nnoremap u  :<c-u>call <SID>Undo()<cr>
-		" nnoremap g+ <nop>
-		" nnoremap U  <nop>
-		" nnoremap g- <nop>
-		" nnoremap u  <nop>
+		" process current line
+		nnoremap <leader>v	:<c-u>call <SID>ProcessFile('current')<cr>
+		" process visual selection
+		vnoremap <leader>v	:<c-u>call <SID>ProcessFile('visual')<cr>
+		" process whole file
+		nnoremap <leader>V	:<c-u>call <SID>ProcessFile('all')<cr>
+		
 		let g:vimdoit_did_load_mappings = 1
 endif
 
