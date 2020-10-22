@@ -719,8 +719,19 @@ function! s:NewID()
 	endwhile 
 	return l:id
 endfunction
-
 command! -nargs=? NewID	:call s:NewID()
+
+function! s:GetExtendedIds(dates)
+	let ids = []
+	for d in a:dates
+		let l:id = s:GenerateID(4)
+		while s:InList(ids, l:id) == v:true
+			let l:id = trim(system('echo '.l:id.' | sha256sum'))[0:3]
+		endwhile 
+		call add(ids, l:id)
+	endfor
+	return ids
+endfunction
 
 function! s:ReplaceLineWithTask(task, lnum)
 	" change the level accordingly
@@ -1646,8 +1657,22 @@ function! s:GetDateAndTime(str)
 endfunction
 
 function! s:CmpQfByDate(e1, e2)
-	let [t1, t2] = [s:GetDateAndTime(a:e1.text), s:GetDateAndTime(a:e2.text)]
-	return t1 ># t2 ? 1 : t1 ==# t2 ? 0 : -1
+	let [d1, d2] = [s:ExtractDate(a:e1['text']), s:ExtractDate(a:e2['text']) ]
+	if d1['date'] ># d2['date']
+		return 1
+	elseif d1['date'] ==# d2['date']
+
+		if d1['time'] ># d2['time']
+			return 1
+		elseif d1['time'] ==# d2['time']
+			return 0
+		else
+			return -1
+		endif
+
+	else
+		return -1	
+	endif
 endfunction
 
 function! s:CmpQfById(e1, e2)
@@ -1884,6 +1909,116 @@ function! s:NicenQfByDate(qf)
 	
 endfunction
 
+let s:p_date   = '\d{4}-\d{2}-\d{2}'
+let s:p_days   = '(Mo\|Di\|Mi\|Do\|Fr\|Sa\|So): '
+let s:p_hour   = ' \d{2}:\d{2}'
+let s:p_rep    = '(y\|mo\|w\|d):\d+'
+let s:p_id     = '0x[[:xdigit:]]{8}'
+let s:p_id_ext = '\\|\d+'
+let s:p_ext_id = s:p_id.s:p_id_ext
+
+function! s:GetQfList(pattern, path)
+	call vimdoit_utility#SaveOptions()
+	call s:SetGrep()
+	call vimdoit_utility#SaveCfStack()
+
+	if a:path ==# '%'
+		let file = shellescape(expand('%'))
+	else
+		let file = ''
+		execute "cd ".a:path
+	endif	
+
+	execute 'silent grep! --pre '.g:vimdoit_plugindir.'/scripts/pre-project.sh --type-add '"vimdoit:*.vdo"' -t vimdoit '.shellescape(a:pattern).' '.file | copen
+
+	let list = getqflist()
+	
+	call vimdoit_utility#RestoreCfStack()
+	call vimdoit_utility#RestoreOptions()
+	call s:RestoreGrep()
+
+	return list
+endfunction
+
+function! s:GenerateTasks(dates, line)
+	let t            = s:ExtractLineData(a:line)
+	let list         = []
+	let id_extension = s:GetExtendedIds(a:dates)
+	let idx          = 0
+	for d in a:dates
+		let tmp                    = deepcopy(t)
+		let tmp['date']['date']    = d['date']
+		let tmp['date']['time']    = d['time']
+		let tmp['date']['weekday'] = -1
+		let tmp['id']              = tmp['id'].'|'.id_extension[idx]
+		let idx                    = idx + 1
+		call add(list, s:CompileTaskString(tmp))
+	endfor
+	return list
+endfunction
+
+function! s:ExpandRepetitions(repetitions, extended_ids)
+	let list = []
+
+	for rep in a:repetitions
+		" no false positives, because our grep pattern is not 100% correct
+		if s:HasLineRepetition(rep['text']) == v:false
+			continue
+		endif
+		
+		" generate the possible dates
+		let dates = s:GenerateDatesFromRepetition(rep['text'])
+		
+		" filter already existing dates
+		let rep_id = s:ExtractId(rep['text'])
+		
+		for id in a:extended_ids
+			let ext_id = s:ExtractBaseId(id['text'])
+			if rep_id ==# ext_id
+				let date = s:ExtractDate(id['text'])
+				call filter(dates, "v:val['date'] !=# ".shellescape(date['date']))
+			endif
+		endfor
+
+		" generate tasks from remaining dates
+		let tasks = s:GenerateTasks(dates, rep['text'])
+		
+		" extend by qf attributes
+		for t in tasks
+			let tmp         = copy(rep)
+			let tmp['text'] = t
+			call add(list, tmp)
+		endfor
+	endfor
+
+	return list
+endfunction
+
+function! s:GrepTasksWithDate(path)
+	" grep regular dates
+	let pat_dates_regular = '\{('.s:p_days.')?'.s:p_date.'('.s:p_hour.')?\}'
+	let dates_regular = s:GetQfList(pat_dates_regular, a:path)
+	" grep dates with extended-ids
+	let pat_extended_ids = '\b'.s:p_id.s:p_id_ext.'\b'
+	let extended_ids = s:GetQfList(pat_extended_ids, a:path)
+	" grep repetitions
+	let pat_repetitions = '\{'.s:p_date.'('.s:p_hour.')?\\|'.s:p_rep.'(\\|'.s:p_date.'('.s:p_hour.')?)?\}'
+	let repetitions = s:GetQfList(pat_repetitions, a:path)
+	" expand repetitions
+	let gen = s:ExpandRepetitions(repetitions, extended_ids)
+	" merge lists
+	let all = []
+	call extend(all, dates_regular)
+	call extend(all, gen)
+	" sort by date
+	call sort(all, 's:CmpQfByDate')
+	" setting list
+	call setqflist(all)
+	let s:quickfix_type = 'date'
+	call s:SetQfSyntax()
+	echom "...finished"
+endfunction
+
 function! s:GrepTasksByStatus(status, path)
 
 	call vimdoit_utility#SaveOptions()
@@ -1929,11 +2064,7 @@ function! s:GrepTasksByStatus(status, path)
 		let pattern = "\\{.*\\}"
 		let title = 'tasks: scheduled'
 	elseif a:status ==# 'date'
-		" let pattern = "\\{\\(\\(Mo\\|Di\\|Mi\\|Do\\|Fr\\|Sa\\|So\\):\\s\\)?\\d{4}-\\d{2}-\\d{2}(\\s*\\d{2}:\\d{2})?\\s*\\}"
-		let pattern = '\{.*\}'
-		" let pattern = "\\{.*?\\}"
-		" let pattern = escape(s:patterns['date'], '{\}(|)')
-		let title = 'tasks: date'
+		" SEE: s:GrepTasksWithDate()
 	elseif a:status ==# 'repetition'
 		let pattern = "\\{\\s*\\d{4}-\\d{2}-\\d{2}\\\\|[a-z]{1,2}:.*\\}"
 		let title = 'tasks: repetition'
@@ -1943,17 +2074,10 @@ function! s:GrepTasksByStatus(status, path)
 
 	let l:qf = getqflist()
 
-	if a:status ==# 'date'
-		" sort by date
-		call sort(l:qf, 's:CmpQfByDate')
-		let title = s:ModifyQfTitle(title, 'add', 'sort', 'date')
-		let s:quickfix_type = 'date'
-	else
-		" sort by priority
-		call sort(l:qf, 's:CmpQfByPriority')
-		let title = s:ModifyQfTitle(title, 'add', 'sort', 'priority')
-		let s:quickfix_type = 'task'
-	endif
+	" sort by priority
+	call sort(l:qf, 's:CmpQfByPriority')
+	let title = s:ModifyQfTitle(title, 'add', 'sort', 'priority')
+	let s:quickfix_type = 'task'
 	
 	" push list
 	call setqflist(l:qf, 'r')	
@@ -2006,19 +2130,16 @@ endfunction
 function! s:GrepTasks(where)
 	
 	if a:where ==# 'project'
-		let path = '%'
+		let path     = '%'
+		let path_msg = expand('%')
 	elseif a:where ==# 'area'
-		let path = getcwd()
+		let path     = getcwd()
+		let path_msg = path
 	else
-		let path = g:vimdoit_projectsdir
+		let path     = g:vimdoit_projectsdir
+		let path_msg = path
 	endif
 	
-	let path_nicened = substitute(path, '\v'.g:vimdoit_projectsdir, '', '')
-
-	if path_nicened ==# ''
-		let path_nicened = '/'
-	endif
-
 	let selections = [
 				\ 'all',
 				\ 'todo',
@@ -2050,10 +2171,14 @@ function! s:GrepTasks(where)
 				\ '&invalid date',
 				\ ]
 	
-	let input = confirm('Searching Tasks in '.shellescape(path_nicened).'', join(selections_dialog, "\n"))
+	let input = confirm('Search tasks in '.shellescape(path_msg).'', join(selections_dialog, "\n"))
 
 	if selections[input-1] ==# 'invalid date'
 		call s:GrepTasksWithInvalidDate(path)
+	elseif selections[input-1] ==# 'date'
+		echom 'Searching tasks with dates in '.shellescape(path_msg).'...'
+		silent call s:GrepTasksWithDate(path)
+		echom "...done"
 	else
 		call s:GrepTasksByStatus(selections[input-1], path)
 	endif
@@ -3007,9 +3132,10 @@ function! s:IsDateInList(haystack, needle)
 	return v:false
 endfunction
 
-function! s:GenerateDatesFromRepetition(task)
+function! s:GenerateDatesFromRepetition(line)
+	
 	let dates = []
-	let rep   = a:task['repetition']
+	let rep   = s:ExtractRepetition(a:line)
 
 	if rep['starttime'] != -1
 		call add(dates, {'date':rep['startdate'], 'time' : rep['starttime']})
@@ -3262,14 +3388,14 @@ endfunction
 function! s:DeleteUndofiles()	
 	echom "Deleting undo-files"
 	execute 'args '.g:vimdoit_projectsdir.'/**/.undo/*.vdo'
-	silent argdo !rm %
+	argdo !rm %
 endfunction
 command! -nargs=0 RmUndo	:call s:DeleteUndofiles()
 
 function! s:DeleteDatefiles()
 	echom "Deleting date-files"
 	execute 'args '.g:vimdoit_projectsdir.'/**/.*-dates.vdo'
-	silent argdo !rm %
+	argdo !rm %
 endfunction
 command! -nargs=0 RmDates	:call s:DeleteDatefiles()
 
@@ -3329,7 +3455,7 @@ endfunction
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 augroup VimDoit
 	autocmd!
-	autocmd ShellCmdPost * call s:UpdateBufferlist()
+	" autocmd ShellCmdPost * call s:UpdateBufferlist()
 	" autocmd TextChanged *.vdo call s:TextChanged()
 	autocmd BufWritePre *.vdo call s:ProcessFile('all')
 	autocmd BufEnter *.vdo call s:LoadMappings()
