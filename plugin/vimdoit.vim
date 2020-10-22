@@ -23,11 +23,6 @@ if exists("g:vimdoit_projectsdir") == v:false
 	finish
 endif
 
-" check user option for enabling undo/redo
-if exists("g:vimdoit_undo_enable") == v:false
-	let g:vimdoit_undo_enable = v:true
-endif
-
 " check if necessary tools are installed
 let s:tools = ['diff', 'date', 'dateadd', 'dround', 'grep', 'git', 'sed' ]
 
@@ -3341,26 +3336,28 @@ function! s:PropagateDeletedRepetitions(deletions)
 
 	for line in deleted
 		" check if the deleted line has a repetition
-		let rep = s:ExtractRepetition(line['line'])
-		if empty(rep) == v:false
-			" yes, check auto-generated dates for deletion:
+		if s:HasLineRepetition(line['line']) == v:false
+			" no
+			continue
+		endif
+		" yes, check auto-generated dates for deletion:
 
-			" save location
-			call s:SaveLocation()
-			" edit datefile
-			execute "edit! ".s:GetDatefileName()
-			" get id
-			let id = s:ExtractId(line['line'])
-			" delete all parent-less auto-generated dates with `id`
-			if s:GetNumOccurences('\v<0x'.id.'>(\s|$)') == 0
-				" note: the following pattern is ok and won't delete tasks in regular files,
-				" because we are not using `bufdo global`
-				execute 'silent! global/\v<0x'.id.'\|\d+(\s|$)/delete'
-			endif
-			
-			" restore location
-			call s:RestoreLocation()
-			
+		" save location
+		call s:SaveLocation()
+		" edit datefile
+		execute "edit! ".s:GetDatefileName()
+		" get id
+		let id = s:ExtractId(line['line'])
+		" delete all parent-less auto-generated dates with `id`
+		if s:GetNumOccurences('\v<0x'.id.'>(\s|$)') == 0
+			" note: the following pattern is ok and won't delete tasks in regular files,
+			" because we are not using `bufdo global`
+			execute 'silent! global/\v<0x'.id.'\|\d+(\s|$)/delete'
+		endif
+
+		" restore location
+		call s:RestoreLocation()
+
 	endfor
 	
 endfunction
@@ -3577,10 +3574,11 @@ function! s:ProcessFile(what)
 endfunction
 
 function! s:TextChanged()
-	" echom "Event: TextChanged in buffer ".bufname(bufnr())
+	echom "Event: TextChanged in buffer ".bufname(bufnr())
 	
 	" ignore event, if it was triggered by an undo or redo
 	if b:undo_event == v:true
+		echom "Abort TextChanged() due to b:undo_event == v:true"
 		let b:undo_event = v:false
 		return
 	endif
@@ -3781,6 +3779,7 @@ function! s:Undo()
 			return
 		endif
 
+		echom "Setting state of buffer ".bufname(bufnr)." to ".file
 		silent execute ':%!cat '.file
 		let b:undo_pointer = b:undo_pointer - 1
 		let b:undo_event   = v:true
@@ -3791,7 +3790,7 @@ function! s:Undo()
 
 endfunction
 
-" command! -nargs=0 VdoRedo	:call s:Redo()
+command! -nargs=0 VdoRedo	:call s:Redo()
 function! s:Redo()
 
 	echom "Redoing"
@@ -3815,6 +3814,7 @@ function! s:Redo()
 			return
 		endif
 
+		echom "Setting state of buffer ".bufname(bufnr)." to ".file
 		silent execute ':%!cat '.file
 		let b:undo_pointer = b:undo_pointer + 1
 		let b:undo_event   = v:true
@@ -3827,12 +3827,13 @@ endfunction
 
 function! s:PrintStacks()
 	echom "-------------"
-	echom "Undo List:"
+	echom "Undo Stack:"
 	echom s:undo_stack
-	echom "Redot List:"
+	echom "Redo Stack:"
 	echom s:redo_stack
 	echom "Undo Pointer:"
 	echom b:undo_pointer
+	echom "-------------"
 endfunction
 command! -nargs=0 VdoStack	:call s:PrintStacks()
 
@@ -3841,7 +3842,10 @@ command! -nargs=0 VdoStack	:call s:PrintStacks()
 "                               Mappings                                "
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
-if exists("g:vimdoit_did_load_mappings") == v:false
+function! s:LoadMappings()
+
+	if exists("b:vimdoit_did_load_mappings") == v:false
+		echom "Loading mappings"
 		" Grep projects in cwd
 		nnoremap <leader>p	:<c-u>call <SID>GrepProjects(v:false)<cr>
 		" Grep projects in root
@@ -3883,11 +3887,12 @@ if exists("g:vimdoit_did_load_mappings") == v:false
 		vnoremap <leader>v	:<c-u>call <SID>ProcessFile('visual')<cr>
 		" process whole file
 		nnoremap <leader>V	:<c-u>call <SID>ProcessFile('all')<cr>
-		
-		let g:vimdoit_did_load_mappings = 1
-endif
+		echom "Mappings loaded"
 
+		let b:vimdoit_did_load_mappings = 1
+	endif
 
+endfunction
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 "                             Autocommands                              "
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -3896,7 +3901,7 @@ augroup VimDoit
 	autocmd ShellCmdPost * call s:UpdateBufferlist()
 	autocmd TextChanged *.vdo call s:TextChanged()
 	autocmd VimLeave *.vdo call s:DeleteUndofiles()
-	autocmd BufEnter *.vdo call s:InitUndo()
+	autocmd BufEnter *.vdo call s:InitUndo() | call s:LoadMappings()
 
 	if v:vim_did_enter
 		call s:InitBufferlist()
