@@ -567,9 +567,8 @@ function! s:DataUpdateEndOfEachSection(section)
 	return l:prev_section
 endfunction
 
+" TODO merge the two functions below
 function! s:DataAddTask(task)
-	" DEPRECATED: those attributes are only for compatibility purposes kept
-	
 	" update tasks stack according to level	
 	call s:DataStackUpdate(s:tasks_stack, a:task["level"])
 	" decide where to add task to (current section or current tasks)
@@ -908,13 +907,6 @@ function! s:ExtractDateFull(line)
 	return trim(l:datefull[0])
 endfunction
 
-function! s:ExtractDateId(line)
-	let l:pattern = '\v0x\x{8}\|\zs\d+\ze'
-	let l:dateid    = []
-	call substitute(a:line, l:pattern, '\=add(l:dateid, submatch(0))', 'g')
-	return trim(l:dateid[0])
-endfunction
-
 function! s:ExtractTaskName(line)
 	return substitute(a:line, '\v^\s*- \[.\]\s', '', '')
 endfunction
@@ -1035,7 +1027,7 @@ let s:pat_note = s:pat_indendation.'-\s*'
 let s:pat_task = s:pat_indendation.'- \[.\]\s*'
 let s:pat_notetask = s:pat_note.'(\[.\])?\s*'
 let s:pat_notetaskexc = s:pat_notetask.'(!*\s*)?'
-let s:pat_id = '\x{8}(\|\d+)?'
+let s:pat_id = '\x{8}(\|\x{4})?'
 let s:pat_weekday = '((Mon|Tue|Wed|Thu|Fri|Sat|Sun)|(Mo|Di|Mi|Do|Fr|Sa|So)): '
 let s:pat_date = '\d{4}-\d{2}-\d{2}'
 let s:pat_time = '\d{2}:\d{2}'
@@ -1914,8 +1906,8 @@ let s:p_days   = '(Mo\|Di\|Mi\|Do\|Fr\|Sa\|So): '
 let s:p_hour   = ' \d{2}:\d{2}'
 let s:p_rep    = '(y\|mo\|w\|d):\d+'
 let s:p_id     = '0x[[:xdigit:]]{8}'
-let s:p_id_ext = '\\|\d+'
-let s:p_ext_id = s:p_id.s:p_id_ext
+let s:p_id_ext_deprecated = '\\|\d+'
+let s:p_id_ext = '\\|[[:xdigit:]]{4}'
 
 function! s:GetQfList(pattern, path)
 	call vimdoit_utility#SaveOptions()
@@ -2017,6 +2009,13 @@ function! s:GrepTasksWithDate(path)
 	let s:quickfix_type = 'date'
 	call s:SetQfSyntax()
 	echom "...finished"
+endfunction
+
+command! -nargs=0 GrepDeprecatedIds	:call s:GrepTasksWithDeprecatedIds()
+function! s:GrepTasksWithDeprecatedIds()
+	let pat_extended_ids_deprecated = '\b'.s:p_id.s:p_id_ext.'\b'
+	let extended_ids = s:GetQfList(pat_extended_ids_deprecated, g:vimdoit_projectsdir)
+	call setqflist(extended_ids)
 endfunction
 
 function! s:GrepTasksByStatus(status, path)
@@ -2253,7 +2252,7 @@ function! s:SetQfSyntax()
 	syntax match FlagWaiting "\v\~\d+" contained
 	highlight link FlagWaiting String
 	" Flag ID ('0x8c3d19d5')
-	syntax match FlagID "\v0x\x{8}(\|\d+)?" contained conceal
+	syntax match FlagID "\v0x\x{8}(\|\x{4})?" contained conceal
 	highlight link FlagID NerdTreeDir
 	" Flag ordinary tag ('#SOMESTRING')
 	syntax match FlagTag "\v#[^ \t]*" contained
