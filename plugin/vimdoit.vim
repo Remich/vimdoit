@@ -47,7 +47,6 @@ let s:quickfix_type = 'none'
 let s:changedlines  = []
 let s:syntax_errors = []
 let s:parse_runtype = 'single'
-let b:undo_event    = v:false
 
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 "																Utility Functions													 "
@@ -96,12 +95,6 @@ function! s:StackFree(list)
 	if s:StackEmpty(a:list) == v:false
 		call remove(a:list, 0, -1)
 	endif
-endfunction
-
-function! s:GetDatefileName()
-	let filepath = expand('%:h')
-	let filename = expand('%:t:r')
-	return filepath.'/.'.filename.'-dates.vdo'	
 endfunction
 
 function! s:SetGrep()
@@ -181,7 +174,6 @@ function! s:InitBufferlist()
 	echom "Initializing buffer list"
 	call s:SaveLocation()
 	execute 'argadd '.g:vimdoit_projectsdir.'/**/*.vdo '.g:vimdoit_projectsdir.'/**/.*.vdo'
-	silent argdo silent call s:InitUndo()
 	call s:RestoreLocation()
 	echom "Initializing finished, vimdoit ready"
 endfunction
@@ -193,14 +185,6 @@ function! s:UpdateBufferlist()
 	let buffers = getbufinfo({'buflisted':1})	 
 	
 	for b in buffers
-		" no undo files
-		" TODO maybe remove?
-		" echom "fullpath: ".expand('#'.b['bufnr'].':p')
-		" if expand('#'.b['bufnr'].':p') =~# '\v\.undo\/'
-		" 	echom "wiping buffer :".bufname(b['bufnr'])
-		" 	execute "bwipeout!".b['bufnr']
-		" endif
-
 		" wipe not existing files
 		if filereadable(bufname(b['bufnr'])) == v:false
 			echom "wiping buffer :".bufname(b['bufnr'])
@@ -701,19 +685,6 @@ function! s:DataGetAllTasksAndNotes(item, list)
 
 endfunction
 
-
-function! s:DataUpdateReferencesIsRefLocal(ref)
-	" TODO
-	return v:true
-endfunction
-
-function! s:DataUpdateReferencesLocalRef(ref)
-	" does the section exist?	
-	" NO: throw error; abort
-	
-	" add reference to section in `s:project_tree`
-endfunction
-
 function! s:GenerateID(len)
 	return trim(system('date "+%s%N" | sha256sum'))[0:a:len-1]
 endfunction
@@ -737,40 +708,6 @@ function! s:GetNumOccurences(pat)
 	call s:RestoreLocation()
 	" return found occurrences
 	return len(split(l:res, '\n'))
-endfunction
-
-function! s:RemoveOccurenceFromDatesList(line, dates)
-	let dates = s:ExtractDate(a:line)
-	let idx = 0
-	for i in a:dates
-		if i["date"] ==# dates['date']
-			echom "filtering ".i["date"]
-			call remove(a:dates, idx)
-			let id = s:ExtractDateId(a:line)
-			call add(s:extended_ids_in_use, id)
-		endif
-		let idx = idx + 1
-	endfor
-endfunction
-	
-function! s:FilterDatesListBasedOnOccurences(pat, dates)
-	" echom "Filtering dates based on occurence of pattern ".a:pat
-	" save location
-	call s:SaveLocation()
-	" find occurences
-	execute 'silent! bufdo global/'.a:pat.'/call s:RemoveOccurenceFromDatesList(getline("."), a:dates)'
-	" restore location
-	call s:RestoreLocation()
-endfunction
-
-function! s:FindMaximumExtendedIdInUse(pat)
-	echom "Finding maximum extended id in use of pattern ".a:pat
-	" save location
-	call s:SaveLocation()
-	" find occurences
-	execute 'bufdo global/'.a:pat.'/call s:RemoveOccurenceFromDatesList(getline("."), a:dates)'
-	" restore location
-	call s:RestoreLocation()
 endfunction
 
 function! s:NewID()	
@@ -1556,18 +1493,6 @@ endfunction
 function! s:NavParsingEnd()
 endfunction
 
-function! s:IsDateFile()
-	" check if this is a datefile
-	let basename = expand('%:t:r')
-	return basename =~# '\v\..*-date'
-endfunction
-
-function! s:IsUndoFile()
-	" check if this is a datefile
-	let basename = expand('%:p')
-	return basename =~# '\v.*\.undo\/'
-endfunction
-
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 "                        Quickfix Manipulation                          "
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -1832,8 +1757,7 @@ function! s:GrepTasksWithInvalidDate(path)
 	call s:SetGrep()
 	
 	if a:path ==# '%'
-		let datefile = s:GetDatefileName()
-		let file = '% '.datefile
+		let file = '%'
 	else
 		let file = ''
 		execute "cd ".a:path
@@ -1966,12 +1890,7 @@ function! s:GrepTasksByStatus(status, path)
 	call s:SetGrep()
 
 	if a:path ==# '%'
-		let datefile = s:GetDatefileName()
-		if filereadable(datefile) == v:true
-			let file = '% '.datefile
-		else
-			let file = '%'
-		endif
+		let file = '%'
 	else
 		let file = ''
 		execute "cd ".a:path
@@ -3035,42 +2954,13 @@ function! s:CompileTaskString(task)
 	return str
 endfunction
 
-" TODO refactor
-function! s:ExtendLineWithTask(t1, dates, lnum)
-	" skip if datefile
-	if s:IsDateFile() == v:true | return | endif
-	
-	let line = getline(a:lnum)
-	" check if date is in datelist
-	let t2       = s:ExtractLineData(line)
-	let datetime = {}
-	let idx      = 0
-	while idx < len(a:dates)
-		if a:dates[idx]['date'] ==# t2['date']['date']
-			let datetime = a:dates[idx]
-			call add(s:used_dates, a:dates[idx])
-			call add(s:used_ids, t2['id'])
-			break
-		endif
-		let idx = idx + 1
-	endwhile
-	" abort if date is not in datelist
-	if empty(datetime) == v:true
-		return
-	endif
-	" extend & set
-	let tnew['text']         = t2['text']
-	let tnew['date']['time'] = datetime['time']
-	let str                  = s:CompileTaskString(tnew)
-	call setline(a:lnum, str)
-endfunction
-
+" TODO rename
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 "                             References                                "
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
-function! s:PropagateReferences(lines)
-	echom "Propagating references"
+function! s:PropagateChanges(lines)
+	echom "Propagating changes"
 	" save location
 	call s:SaveLocation()
 	for lnum in a:lines
@@ -3117,142 +3007,6 @@ function! s:IsDateInList(haystack, needle)
 	return v:false
 endfunction
 
-function! s:SortDateFile()
-	let save_cursor = getcurpos()
-	let save_file = expand('%')
-	let datefile = s:GetDatefileName()
-	execute 'edit! '.datefile
-	execute '%sort'
-	execute 'write!'
-	let buf = bufnr()
-	execute 'edit '.save_file
-	call setpos('.', save_cursor)
-	execute buf.'bdelete!'
-endfunction
-
-function! s:UpdateFirstLineOfDateFile()
-	echom "Updating first line datefile of file ".expand('%')
-	" check if project has any tags
-	if has_key(s:project_tree['flags'], 'tag') == v:false
-		return
-	endif
-	" only continue if there is already a datefile
-	if filereadable(s:GetDatefileName()) == v:false
-		return
-	endif
-	call s:SaveLocation()
-	execute 'edit! '.s:GetDatefileName()
-	call setline('1', join(s:project_tree['flags']['tag'], " "))
-	update!
-	let buf = bufnr()
-	call s:RestoreLocation()
-endfunction
-
-function! s:PropagateRepetitions(lines)
-	echom "Propagate repetitions"
-	" skip if datefile
-	if s:IsDateFile() == v:true | return | endif
-	" save location
-	call s:SaveLocation()
-	" get datefile for later
-	let datefile = s:GetDatefileName() 
-
-	for lnum in a:lines
-		let line = getline(lnum)
-		" check if line is task or note
-		if s:IsLineTask(line) == v:false && s:IsLineNote(line) == v:false
-			continue
-		endif
-		" check if line has a repetition
-		if s:HasLineRepetition(line) == v:false
-			continue
-		endif
-		" extract data
-		let task = s:ExtractLineData(line)
-		" generate list of dates from repetition
-		let dates = s:GenerateDatesFromRepetition(task)
-		" update references of auto-generated tasks in arglist
-		execute 'silent! bufdo global/\v<0x'.task['id'].'(\|\d+)>/call s:ExtendLineWithTask(task, dates, line("."))'
-	endfor
-
-	" restore location
-	call s:RestoreLocation()
-endfunction
-
-function! s:DeleteFromDatefile(id)
-	
-	" skip if there is not a datefile
-	if filereadable(s:GetDatefileName()) == v:false
-		return
-	endif
-
-	" save location
-	call s:SaveLocation()
-	" edit datefile
-	execute "edit! ".s:GetDatefileName()
-	" deletion
-	execute 'silent! global/\v<0x'.a:id.'\|\d+(\s|$)/delete'
-	" restore location
-	call s:RestoreLocation()
-endfunction
-
-" deletes all parent-less auto-generated dates with `id`
-function! s:CheckDeletionFromDatefile(id)
-	
-	" skip if there is not a datefile
-	if filereadable(s:GetDatefileName()) == v:false
-		return
-	endif
-
-	" save location
-	call s:SaveLocation()
-	" edit datefile
-	execute "edit! ".s:GetDatefileName()
-	
-	if s:GetNumOccurences('\v<0x'.a:id.'>(\s|$)') == 0
-		" note: the following pattern is ok and won't delete tasks in regular files,
-		" because we are not using `bufdo global`
-		execute 'silent! global/\v<0x'.a:id.'\|\d+(\s|$)/delete'
-	endif
-	
-	" restore location
-	call s:RestoreLocation()
-endfunction
-
-" remove all auto-generated dates where there is no parent anymore
-function! s:DeleteOrphanedAutoGeneratedDatesInDatefile()
-	echom "Delete orphaned auto-generated dates in date-file of ".bufname(bufnr())
-	" abort, if there is not a datefile
-	if filereadable(s:GetDatefileName()) == v:false
-		return
-	endif
-	" save location
-	call s:SaveLocation()
-	" edit datefile
-	execute "edit! ".s:GetDatefileName()
-	" get all unique base-ids used in the datefile
-	let lines   = range(2, line('$'))
-	let baseids = []
-	for lnum in lines
-		call add(baseids, s:ExtractBaseId(getline(lnum)))
-	endfor
-	call uniq(sort(baseids))
-
-	" check for deletion
-	for id in baseids
-		" delete all parent-less auto-generated dates with `id`
-		if s:GetNumOccurences('\v<0x'.id.'>(\s|$)') == 0
-			echom "Deleting all auto-generated dates with base-id ".id
-			" note: the following pattern is ok and won't delete tasks in regular files,
-			" because we are not using `bufdo global`
-			execute 'silent! global/\v<0x'.id.'\|\d+(\s|$)/delete'
-		endif
-	endfor
-	
-	" restore location
-	call s:RestoreLocation()
-endfunction
-
 function! s:GenerateDatesFromRepetition(task)
 	let dates = []
 	let rep   = a:task['repetition']
@@ -3265,7 +3019,7 @@ function! s:GenerateDatesFromRepetition(task)
 	endif
 		
 	" Add repetitions into the future, but limit how many.
-	" We don't want do flood the datefiles with too much data, otherwise
+	" We don't want to have too many dates in the lists, otherwise
 	" grepping will be slowed down.
 	if rep['enddate'] == -1
 		let today = strftime('%Y-%m-%d')
@@ -3302,134 +3056,6 @@ function! s:GenerateDatesFromRepetition(task)
 	endif
 	
 	return dates
-endfunction
-
-function! s:PropagateDeletedRepetitions(deletions)
-	echom "Propagating deleted repetitions"
-	" abort, if there is not a datefile
-	if filereadable(s:GetDatefileName()) == v:false
-		return
-	endif
-
-	" get deleted lines from the file before the change
-	let deleted = s:GetLinesOfDiskfile(a:deletions)
-
-	for line in deleted
-		" check if the deleted line has a repetition
-		if s:HasLineRepetition(line['line']) == v:false
-			" no
-			continue
-		endif
-		" yes, check auto-generated dates for deletion:
-
-		" save location
-		call s:SaveLocation()
-		" edit datefile
-		execute "edit! ".s:GetDatefileName()
-		" get id
-		let id = s:ExtractId(line['line'])
-		" delete all parent-less auto-generated dates with `id`
-		if s:GetNumOccurences('\v<0x'.id.'>(\s|$)') == 0
-			" note: the following pattern is ok and won't delete tasks in regular files,
-			" because we are not using `bufdo global`
-			execute 'silent! global/\v<0x'.id.'\|\d+(\s|$)/delete'
-		endif
-
-		" restore location
-		call s:RestoreLocation()
-
-	endfor
-	
-endfunction
-
-function! s:PropagateChangedRepetitions(changes)
-	echom "Propagating changed repetitions"
-	" abort, if there is not a datefile
-	if filereadable(s:GetDatefileName()) == v:false
-		return
-	endif
-	
-	let changed = s:GetLinesOfDiskfile(a:changes)
-	" check if changed lines had a repetition before the change, update datefile accordingly
-		for line in changed
-		
-			" check if line is task or note
-			if s:IsLineTask(line) == v:false && s:IsLineNote(line) == v:false
-				continue
-			endif
-			
-			" check if the changed line does still have a repetition
-			let rep_1 = s:ExtractRepetition(getline(line['lnum']))
-			if empty(rep_1) == v:false
-				" yes
-				continue
-			endif
-			
-			" check if the old line has a repetition
-			if s:HasLineRepetition(line['line']) == v:true
-				" yes, delete
-				call s:DeleteFromDatefile(s:ExtractId(line['line']))
-			endif
-		endfor
-	
-endfunction
-
-function! s:AddDatesFromRepetitions(lines)
-	echom "Addding dates from repetitions"
-	
-	" save location
-	call s:SaveLocation()
-
-	let lines = map(a:lines, 'getline(v:val)')
-
-	execute 'edit! '.s:GetDatefileName()
-	
-	" loop #cur
-	for line in lines
-
-		" check if line is task or note
-		if s:IsLineTask(line) == v:false && s:IsLineNote(line) == v:false
-			echom "Abort line no task or note"
-			continue
-		endif
-		
-		" check if line has a repetition
-		if s:HasLineRepetition(line) == v:false
-			echom "Abort line has no repetition"
-			continue
-		endif
-
-		let baseid = s:ExtractBaseId(line)
-		
-		" note: the following pattern is ok and won't delete tasks in regular files,
-		" because we are not using `bufdo global`
-		execute 'silent! global/\v<0x'.baseid.'\|\d+(\s|$)/delete'
-
-		let task  = s:ExtractLineData(line)
-		let dates = s:GenerateDatesFromRepetition(task)
-		
-		let s:extended_ids_in_use = []
-		" find occurences and filter auto-generated dates
-		call s:FilterDatesListBasedOnOccurences('\v<0x'.baseid.'\|\d+(\s|$)', dates)
-
-		" find maximum extended-id in use
-		let sid = max(s:extended_ids_in_use) + 1
-		
-		" add remmaining dates
-		for d in dates
-			let new         = deepcopy(task)
-			let new['id']   = task['id'].'|'.sid
-			let new['date'] = { 'date': d['date'], 'weekday': -1, 'time': d['time']}
-			let str         = s:CompileTaskString(new)
-			call append(line('$'), str)
-			
-			let sid = sid + 1
-		endfor
-	endfor
-	
-	" restore location
-	call s:RestoreLocation()
-	
 endfunction
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -3532,47 +3158,19 @@ endfunction
 
 function! s:ProcessChanges(changes)
 	echom "Processing changes"
-	" syntax check
-	call s:ValidateSyntax(a:changes)
-	" id check
-	call s:ValidateId(a:changes)
-	" re-build line
-	call s:RebuiltLine(a:changes)
-	" update references
-	call s:PropagateReferences(a:changes)
-	" update dates
-	call s:PropagateRepetitions(a:changes)
-	" propagate changed repetitions
-	call s:PropagateChangedRepetitions(a:changes)
 endfunction
 
 function! s:ProcessInsertions(insertions)
 	echom "Processing insertions"
-	" syntax check
-	call s:ValidateSyntax(a:insertions)
-	" id check
-	call s:ValidateId(a:insertions)
-	" re-build line
-	call s:RebuiltLine(a:insertions)
-	" update references
-	call s:PropagateReferences(a:insertions)
-	" update dates
-	call s:PropagateRepetitions(a:insertions)
-	" add dates from repetitions
-	call s:AddDatesFromRepetitions(a:insertions)
 endfunction
 
 function! s:ProcessDeletions(deletions)
 	echom "Processing deletions"
-	" propagate deleted repetitions
-	call s:PropagateDeletedRepetitions(a:deletions)
 endfunction
 
 " process every line of the file
 command! ProcessFile :call s:ProcessFile('all')
 function! s:ProcessFile(what)
-	" skip if datefile
-	if s:IsDateFile() == v:true | return | endif
 	
 	" decide which lines should be processed
 	if a:what ==# 'all'
@@ -3591,9 +3189,6 @@ function! s:ProcessFile(what)
 		echoerr "Unknown argument for `a:what` :".a:what
 	endif
 
-	" TODO rename to disable text_changed
-	let b:undo_event = v:true
-
 	" TODO remove me
 	" echom "Not yet fully implemented. Abort."
 	" return
@@ -3605,14 +3200,8 @@ function! s:ProcessFile(what)
 		call s:ValidateId(lines)
 		" re-build line
 		call s:RebuiltLine(lines)
-		" delete all auto-generated dates where there is no corresponding repetition
-		call s:DeleteOrphanedAutoGeneratedDatesInDatefile()
-		" for each repetiton #next
-			" delete all corresponding auto-generated dates in datefile 
-			" add auto-generated dates, but not those which exist somewhere in a project (not datefile)
-		call s:AddDatesFromRepetitions(lines)
-		" update first line of datefile
-		call s:UpdateFirstLineOfDateFile()
+		" propagate changes
+		call s:PropagateChanges()
 	catch /.*/
 		echom v:exception." in ".v:throwpoint
 	endtry
@@ -3621,32 +3210,6 @@ endfunction
 
 function! s:TextChanged()
 	echom "Event: TextChanged in buffer ".bufname(bufnr())
-	
-	" ignore event, if it was triggered by an undo or redo
-	if b:undo_event == v:true
-		echom "Abort TextChanged() due to b:undo_event == v:true"
-		let b:undo_event = v:false
-		return
-	endif
-
-	" ignore event, if we enter a buffer and 
-	" it was previously changed by and undo or redo
-	if exists('b:text_changed_event') == v:true && b:text_changed_event == v:true
-		echom "Abort due to b:text_changed_event"
-		let b:text_changed_event = v:false
-		return
-	endif
-	
-	" check if datefile
-	if s:IsDateFile() == v:true
-		echom "Pushing from datefile.."
-		" only save undo file
-		silent write
-		call s:SaveUndo(bufnr())
-		call s:StackPush(s:undo_stack, [bufnr()])
-		" skip
-		return
-	endif
 	
 	" get diff
 	let changes = s:GetDiff()
@@ -3676,7 +3239,6 @@ function! s:TextChanged()
 			call s:ProcessChanges(changes['changes'])
 		endif
 		
-		call s:UpdateFirstLineOfDateFile()
 		" call s:ParseFile()
 		" call s:DataComputeProgress()
 		" call s:DrawSectionOverview()
@@ -3686,8 +3248,6 @@ function! s:TextChanged()
 		let buffers = deepcopy(getbufinfo({'buflisted':1, 'bufmodified':1}))
 		" write all changed buffers
 		silent wall
-		" save undo-files of changed buffers
-		call s:UpdateUndoFiles(buffers)
 		echom "Writing file. Done."
 		
 	catch /.*/
@@ -3699,189 +3259,19 @@ function! s:TextChanged()
 	
 endfunction
 
-"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-"                              Undo/Redo                                "
-"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-
-let s:undo_dir  = '.undo'
-let s:undo_stack = []
-let s:redo_stack = []
-
-function! s:InitUndo()
-
-	" check if this is a undo file
-	if s:IsUndoFile() == v:true
-		return
-	endif
-	
-	if exists('b:undo_pointer') == v:true
-		return
-	else
-		echom "Init undo in ".bufname(bufnr())
-		let b:undo_pointer = -1
-		call s:SaveUndo(bufnr())
-
-		if s:StackLen(s:undo_stack) == 0
-			call s:StackPush(s:undo_stack, [bufnr()])
-		else
-			call extend(s:StackBottom(s:undo_stack), [bufnr()])
-		endif
-		
-		let b:undo_event = v:false
-	endif
-endfunction
-
-function! s:FormatPointer(ptr)
-	return trim(system('printf "%04d" '.a:ptr))
-endfunction
-
-function! s:GetFilename(pointer)
-	return expand('%:p:h').'/.undo/'.s:FormatPointer(a:pointer).'-'.expand('%:t')
-endfunction
-
-function! s:CheckExistenceUndoDir()
-	let dirname = expand('%:p:h')	.'/.undo/'
-	if isdirectory(dirname) == v:false
-		call system('mkdir '.dirname)
-	endif
-endfunction
-
-function! s:UpdateUndoFiles(buffers)
-
-	" push modified buffers onto `s:undo_stack`
-	if b:undo_event == v:false
-		let mod = []
-		for b in a:buffers
-			call add(mod, b['bufnr'])
-			if b['bufnr'] != bufnr()
-				call setbufvar(b['bufnr'], "text_changed_event", v:true)
-			endif
-		endfor
-		call s:StackPush(s:undo_stack, mod)
-	endif
-
-	" save undo-files of modified buffers
-	for b in a:buffers
-		echom "Trying to save ".bufname(b['bufnr'])
-		call s:SaveUndo(b['bufnr'])
-	endfor
-endfunction
-
-function! s:SaveUndo(bufnr)
-
-	echom "Saving undo of ".bufname(a:bufnr)
-
-	if exists('b:undo_event') == v:false
-		let b:undo_event = v:false
-	endif
-
-	if b:undo_event == v:true
-		let b:undo_event = v:false
-		return
-	endif
-		
-	call s:SaveLocation()
-	execute "buffer ".a:bufnr
-	
-	call s:CheckExistenceUndoDir()
-
-	let file           = s:GetFilename(b:undo_pointer + 1)
-	let b:undo_pointer = b:undo_pointer + 1
-	" reset redo_list
-	let s:redo_stack    = []
-	echom "Saving undo-file of buffer ".bufname(a:bufnr)
-	call system('cp '.expand('%').' '.file)
-
-	call s:RestoreLocation()
-endfunction
-
 function! s:DeleteUndofiles()	
 	echom "Deleting undo-files"
 	execute 'args '.g:vimdoit_projectsdir.'/**/.undo/*.vdo'
 	silent argdo !rm %
 endfunction
+command! -nargs=0 RmUndo	:call s:DeleteUndofiles()
 
-command! -nargs=0 VdoUndo	:call s:Undo()
-function! s:Undo()
-	echom "Undoing"
-	
-	if b:undo_pointer == 0 || s:StackLen(s:undo_stack) == 0
-		echom "Already at oldest change"
-		return
-	endif
-
-	call s:SaveLocation()
-	
-	let buffers = s:StackPop(s:undo_stack)
-	call s:StackPush(s:redo_stack, buffers)
-	
-	for bufnr in buffers
-		execute "buffer ".bufnr
-
-		let file = s:GetFilename(b:undo_pointer - 1)
-		
-		if filereadable(file) == v:false
-			echoerr "Undo file ".file." not found!"
-			return
-		endif
-
-		echom "Setting state of buffer ".bufname(bufnr)." to ".file
-		silent execute ':%!cat '.file
-		let b:undo_pointer = b:undo_pointer - 1
-		let b:undo_event   = v:true
-	endfor
-
-	silent wall
-	call s:RestoreLocation()
-
+function! s:DeleteDatefiles()
+	echom "Deleting date-files"
+	execute 'args '.g:vimdoit_projectsdir.'/**/.*-dates.vdo'
+	silent argdo !rm %
 endfunction
-
-command! -nargs=0 VdoRedo	:call s:Redo()
-function! s:Redo()
-
-	echom "Redoing"
-
-	if s:StackLen(s:redo_stack) == 0
-		echom "Already at newest change"
-		return
-	endif
-
-	call s:SaveLocation()
-	let buffers = s:StackPop(s:redo_stack)
-	call s:StackPush(s:undo_stack, buffers)
-	
-	for bufnr in buffers
-		execute "buffer ".bufnr
-
-		let file = s:GetFilename(b:undo_pointer + 1)
-		
-		if filereadable(file) == v:false
-			echoerr "Undo file ".file." not found!"
-			return
-		endif
-
-		echom "Setting state of buffer ".bufname(bufnr)." to ".file
-		silent execute ':%!cat '.file
-		let b:undo_pointer = b:undo_pointer + 1
-		let b:undo_event   = v:true
-	endfor
-	
-	silent wall
-	call s:RestoreLocation()
-
-endfunction
-
-function! s:PrintStacks()
-	echom "-------------"
-	echom "Undo Stack:"
-	echom s:undo_stack
-	echom "Redo Stack:"
-	echom s:redo_stack
-	echom "Undo Pointer:"
-	echom b:undo_pointer
-	echom "-------------"
-endfunction
-command! -nargs=0 VdoStack	:call s:PrintStacks()
+command! -nargs=0 RmDates	:call s:DeleteDatefiles()
 
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -3922,11 +3312,6 @@ function! s:LoadMappings()
 		nnoremap <leader>qj	:<c-u>call <SID>JumpToToday()<cr>
 		" Yank Task Prompt (Normal)
 		nnoremap Y	:<c-u>call <SID>YankTaskPrompt()<cr>
-		" Remap undo/redo to re-implementation of undo/redo
-		nnoremap g+ :<c-u>call <SID>Redo()<cr>
-		nnoremap U  :<c-u>call <SID>Redo()<cr>
-		nnoremap g- :<c-u>call <SID>Undo()<cr>
-		nnoremap u  :<c-u>call <SID>Undo()<cr>
 		" process current line
 		nnoremap <leader>v	:<c-u>call <SID>ProcessFile('current')<cr>
 		" process visual selection
@@ -3945,9 +3330,9 @@ endfunction
 augroup VimDoit
 	autocmd!
 	autocmd ShellCmdPost * call s:UpdateBufferlist()
-	autocmd TextChanged *.vdo call s:TextChanged()
-	autocmd VimLeave *.vdo call s:DeleteUndofiles()
-	autocmd BufEnter *.vdo call s:InitUndo() | call s:LoadMappings()
+	" autocmd TextChanged *.vdo call s:TextChanged()
+	autocmd BufWritePre *.vdo call s:ProcessFile('all')
+	autocmd BufEnter *.vdo call s:LoadMappings()
 
 	if v:vim_did_enter
 		call s:InitBufferlist()
