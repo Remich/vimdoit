@@ -1028,6 +1028,7 @@ let s:pat_task = s:pat_indendation.'- \[.\]\s*'
 let s:pat_notetask = s:pat_note.'(\[.\])?\s*'
 let s:pat_notetaskexc = s:pat_notetask.'(!*\s*)?'
 let s:pat_id = '\x{8}(\|\x{4})?'
+let s:pat_id_deprecated = '\x{8}(\|\d+)?'
 let s:pat_weekday = '((Mon|Tue|Wed|Thu|Fri|Sat|Sun)|(Mo|Di|Mi|Do|Fr|Sa|So)): '
 let s:pat_date = '\d{4}-\d{2}-\d{2}'
 let s:pat_time = '\d{2}:\d{2}'
@@ -2013,9 +2014,24 @@ endfunction
 
 command! -nargs=0 GrepDeprecatedIds	:call s:GrepTasksWithDeprecatedIds()
 function! s:GrepTasksWithDeprecatedIds()
-	let pat_extended_ids_deprecated = '\b'.s:p_id.s:p_id_ext.'\b'
+	let pat_extended_ids_deprecated = '\b'.s:p_id.s:p_id_ext_deprecated.'\b'
 	let extended_ids = s:GetQfList(pat_extended_ids_deprecated, g:vimdoit_projectsdir)
 	call setqflist(extended_ids)
+endfunction
+
+command! -nargs=0 ReplaceDeprecatedIds	:call s:ReplaceDeprecatedIds()
+function! s:ReplaceDeprecatedIds()
+	let list = getqflist()
+	let ext_ids = s:GetExtendedIds(list)
+	let idx = 0
+	for i in list
+		echom "processing task: ".i['text']
+		let task = s:ExtractLineData(i['text'])
+		let id_old = escape(task['id'], '|')
+		let task['id'] = s:ExtractBaseId(i['text']).'|'.ext_ids[idx]
+		execute 'cfdo global/\v<0x'.id_old.'(\s|$)/call s:ReplaceLineWithTask(task, line("."))'
+		let idx = idx + 1
+	endfor
 endfunction
 
 function! s:GrepTasksByStatus(status, path)
@@ -3083,12 +3099,17 @@ endfunction
 "                             References                                "
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
-function! s:PropagateChanges(lines)
+function! s:PropagateChanges()
 	echom "Propagating changes"
+	" get diff
+	let diff = s:GetDiff()
+	" get all lines
+	let lines = extend([], extend(diff['changes'], diff['insertions']))
+	call map(lines, 'getline(v:val)')
 	" save location
 	call s:SaveLocation()
-	for lnum in a:lines
-		let line = getline(lnum)
+	
+	for line in lines
 		" check if line is task or note
 		if s:IsLineTask(line) == v:false && s:IsLineNote(line) == v:false
 			continue
@@ -3261,7 +3282,7 @@ endfunction
 
 
 function! s:ValidateId(lines)
-	echom "Validating id"
+	echom "Validating ids"
 	for lnum in a:lines
 		let line = getline(lnum)
 		let item = s:ExtractLineData(line)
@@ -3273,7 +3294,7 @@ function! s:ValidateId(lines)
 endfunction
 
 function! s:RebuiltLine(lines)
-	echom "Rebuilding line"
+	echom "Rebuilding lines"
 	for lnum in a:lines
 		let line = getline(lnum)
 		let item = s:ExtractLineData(line)
@@ -3296,7 +3317,6 @@ endfunction
 " process every line of the file
 command! ProcessFile :call s:ProcessFile('all')
 function! s:ProcessFile(what)
-	
 	" decide which lines should be processed
 	if a:what ==# 'all'
 		" all lines of file
@@ -3314,10 +3334,6 @@ function! s:ProcessFile(what)
 		echoerr "Unknown argument for `a:what` :".a:what
 	endif
 
-	" TODO remove me
-	" echom "Not yet fully implemented. Abort."
-	" return
-
 	try
 		" syntax check
 		call s:ValidateSyntax(lines)
@@ -3328,7 +3344,7 @@ function! s:ProcessFile(what)
 		" propagate changes
 		call s:PropagateChanges()
 	catch /.*/
-		echom v:exception." in ".v:throwpoint
+		echoerr v:exception." in ".v:throwpoint
 	endtry
 
 endfunction
