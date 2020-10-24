@@ -24,7 +24,7 @@ if exists("g:vimdoit_projectsdir") == v:false
 endif
 
 " check if necessary tools are installed
-let s:tools = ['diff', 'date', 'dateadd', 'dround', 'grep', 'git', 'sed' ]
+let s:tools = ['diff', 'date', 'dateadd', 'dround', 'rg', 'sed', 'figlet' ]
 
 for t in s:tools
 	if trim(system("whereis ".t)) ==# t.":"
@@ -290,6 +290,10 @@ function! s:AutoCreateWeeks(start, end)
 	while cur <=# a:end
 		let year  = trim(system('date +%Y --date '.cur))
 		let week  = trim(system('date +%V --date '.cur))
+		echom "cur:".cur
+		echom "year:".year
+		echom "week:".week
+		echom "===="
 		call s:CreateProject(g:vimdoit_projectsdir.'/todo/'.year, 'kw-'.week.'.vdo', 'KW-'.week.' '.year)
 		let cur = trim(system('dateadd '.shellescape(cur).' +1w'))
 	endwhile
@@ -443,9 +447,18 @@ endfunction
 function! s:AutocreateProjects()
 	echom "Auto-creating projects"
 
+	" did we do this already this year?
+	let year = strftime("%Y")
+	if isdirectory(g:vimdoit_projectsdir.'/todo/'.year) == v:true
+		echom "Already done this year."
+		return
+	endif
+
 	let today = strftime('%Y-%m-%d')
-	let start = trim(system('dateadd '.shellescape(today).' -3mo'))
-	let end   = trim(system('dateadd '.shellescape(today).' +3mo'))
+	" let start = trim(system('dateadd '.shellescape(today).' -3mo'))
+	let start = strftime('%Y').'-01-01'
+	" let end   = trim(system('dateadd '.shellescape(today).' +3mo'))
+	let end = strftime('%Y').'-12-31'
 	call s:AutoCreateDays(start, end)
 	call s:AutoCreateWeeks(start, end)
 	call s:AutoCreateMonths(start, end)
@@ -1871,7 +1884,7 @@ function! s:SortPrompt()
 endfunction
 
 function! s:CmpQfByPriority(e1, e2)
-	let [t1, t2] = [s:ExtractPriority(a:e1.text), s:ExtractPriority(a:e2.text)]
+	let [t1, t2] = [s:ExtractPriority(a:e1['text']), s:ExtractPriority(a:e2['text'])]
 	return t1 ># t2 ? -1 : t1 ==# t2 ? 0 : 1
 endfunction
 
@@ -2096,12 +2109,16 @@ function! s:GrepThings(where, what)
 			let char = nr2char(getchar())
 		catch /^Vim:Interrupt$/
 			mode
+			" restore cwd
+			execute 'cd '.cwd_save
 			return
 		endtry
 
 		if char ==# 'm' || char ==# 'i'
 			call s:ToggleGrepOptions(char)
 			mode | call s:GrepProjects(a:where)	
+			" restore cwd
+			execute 'cd '.cwd_save
 			return
 		endif
 
@@ -2124,6 +2141,8 @@ function! s:GrepThings(where, what)
 		elseif char ==# 't'
 			let pattern = '^<.*>.*\#[^\s]+'
 		else
+			" restore cwd
+			execute 'cd '.cwd_save
 			mode | return
 		endif
 
@@ -2137,12 +2156,16 @@ function! s:GrepThings(where, what)
 		try 
 			let char = nr2char(getchar())
 		catch /^Vim:Interrupt$/
+			" restore cwd
+			execute 'cd '.cwd_save
 			mode | return
 		endtry
 
 		if char ==# 'm' || char ==# 'i'
 			call s:ToggleGrepOptions(char)
 			mode | call s:GrepThings(a:where, a:what)	
+			" restore cwd
+			execute 'cd '.cwd_save
 			return
 		endif
 
@@ -2158,6 +2181,8 @@ function! s:GrepThings(where, what)
 		elseif char ==# 'n'
 			let pattern = '\- \[\-\]'
 		else
+			" restore cwd
+			execute 'cd '.cwd_save
 			mode | return
 		endif
 		
@@ -2192,7 +2217,7 @@ function! s:GrepThings(where, what)
 		" restore cfstack
 		call vimdoit_utility#RestoreCfStack()
 		" expand repetitions
-		let gen = s:ExpandRepetitions(repetitions, extended_ids)
+		let gen = s:ExpandRepetitions(repetitions, extended_ids, '')
 		" merge lists
 		let all = []
 		call extend(all, dates_regular)
@@ -2204,8 +2229,6 @@ function! s:GrepThings(where, what)
 		call sort(all, 's:CmpQfByDate')
 		" setting list
 		call setqflist(all)
-		" set syntax
-		" call s:SetQfSyntax()
 		echom "...done"
 		" set syntax
 		call s:SetQfSyntax()
@@ -2251,6 +2274,7 @@ function! s:GrepThings(where, what)
 		call s:SetQfSyntax()
 		" restore cwd
 		execute 'cd '.cwd_save
+		echom "...done"
 		return
 	endif
 
@@ -2280,7 +2304,7 @@ function! s:GenerateTasks(dates, line)
 	return list
 endfunction
 
-function! s:ExpandRepetitions(repetitions, extended_ids)
+function! s:ExpandRepetitions(repetitions, extended_ids, limit)
 	let list = []
 
 	for rep in a:repetitions
@@ -2290,7 +2314,7 @@ function! s:ExpandRepetitions(repetitions, extended_ids)
 		endif
 		
 		" generate the possible dates
-		let dates = s:GenerateDatesFromRepetition(rep['text'])
+		let dates = s:GenerateDatesFromRepetition(rep['text'], a:limit)
 		
 		" filter already existing dates
 		let rep_id = s:ExtractId(rep['text'])
@@ -2483,82 +2507,265 @@ function! s:SetQfSyntax()
 	syntax match CalendarWeek "\v\s(-|\=)(\s{3,}\w+\s\d+\s{3,})(-|\=)$" contains=CalendarText
 	highlight link CalendarWeek Identifier
 	
+	" Section Headings
 	syntax match SectionHeadlineDelimiter "\v\<" contained conceal
 	syntax match SectionHeadlineDelimiter "\v\>" contained conceal
-	syntax match SectionHeadline "\v\<[^\>]*\>" contains=SectionHeadlineDelimiter
+	syntax match SectionHeadline "\v^\t*\zs\<[^\>]*\>\ze" contains=SectionHeadlineDelimiter
 	highlight link SectionHeadline Operator
 	highlight link SectionHeadlineDelimiter Comment
-	syntax region FlagRegionHeadline start="\v\<[^\>]*\>" end="$" contains=Flag,FlagDelimiter,FlagBlock,FlagWaiting,FlagInProgress,FlagSprint,FlagTag,FlagID,SectionHeadline
-	
+	syntax region FlagRegionHeadline start="\v^\t*\<[^\>]*\>" end="$" contains=Flag,FlagDelimiter,FlagBlock,FlagWaiting,FlagSprint,FlagTag,FlagID,SectionHeadline
+
 	" Percentages
 	syntax match Percentages "\v\[.*\%\]"
 	highlight link Percentages Comment
+
 	" Exclamation Mark
 	syntax match ExclamationMark "\v!+"
 	highlight link ExclamationMark Tag
+
 	" Info
 	syntax match Info "\v\u+[?!]*(\s\u+[?!]*)*:"
 	highlight link Info Todo
+
 	" Code
 	syntax match Code "\v`.{-}`"
 	highlight link Code Comment
+
 	" Strings
 	syntax match VimdoitString "\v[ \t]\zs['"].{-}['"]\ze[ \t,.!:\n]" contains=SingleSinglequote
 	highlight link VimdoitString String
+
 	" Time
-	syntax match Date "\v\{.{-}\}"
-	highlight link Date Constant
+	syntax match Appointment "\v\{.{-}\}"
+	highlight link Appointment Constant
+
+	" Inner Headline
+	syntax match InnerHeadline "\v^\s*#+.*$"
+	highlight link InnerHeadline Orange
+
 	" URLs
 	syntax match URL `\v<(((https?|ftp|gopher)://|(mailto|file|news):)[^' 	<>"]+|(www|web|w3)[a-z0-9_-]*\.[a-z0-9._-]+\.[^' 	<>"]+)[a-zA-Z0-9/]`
 	highlight link URL String
+
 	" Flag Delimiter ('--')
 	syntax match FlagDelimiter "\v\s--\s" contained
 	highlight link FlagDelimiter Comment
+
 	" Flag Normal ('-flag')
 	syntax match Flag "\v\zs-.*\ze\s" contained
 	highlight link Flag Comment
+
 	" Flag Sprint ('@sprint')
 	syntax match FlagSprint '\v\@[^ \t]+'
 	syntax match FlagSprint "\v\@today" contained
 	syntax match FlagSprint "\v\@week" contained
 	highlight link FlagSprint Constant
-	" Flag Block ('$23')
-	syntax match FlagBlock "\v\$\d+" contained
+
+	" Flag Block ('#block')
+	syntax match FlagBlock "\v\$<block>" contained
 	highlight link FlagBlock Orange
-	" Flag Waiting For Block ('~23')
-	syntax match FlagWaiting "\v\~\d+" contained
+
+	" Flag Waiting For Block ('~a42a')
+	syntax match FlagWaiting "\v\~\x{8}" contained
 	highlight link FlagWaiting String
+
 	" Flag ID ('0x8c3d19d5')
-	syntax match FlagID "\v0x\x{8}(\|\x{4})?" contained conceal
+	syntax match FlagID "\v0x\x{8}(\|\x{4})?(\s+)?" contained conceal
 	highlight link FlagID NerdTreeDir
+
 	" Flag ordinary tag ('#SOMESTRING')
 	syntax match FlagTag "\v#[^ \t]*" contained
 	highlight link FlagTag Identifier
+
 	" Flag Region
-	syntax region FlagRegion start="\v\s--\s" end="$" contains=Flag,FlagDelimiter,FlagBlock,FlagWaiting,FlagInProgress,FlagSprint,FlagTag,FlagID
+	syntax region FlagRegion start="\v\s--\s" end="$" contains=Flag,FlagDelimiter,FlagBlock,FlagWaiting,FlagSprint,FlagTag,FlagID
 	highlight link FlagRegion NerdTreeDir
+
 	" Task Block
-	syntax match TaskBlock "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*\$\d+" contains=ExclamationMark,Info,Date
+	syntax match TaskBlock "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*\$block" contains=ExclamationMark,Info,Appointment,Code,Percentages
 	highlight link TaskBlock Orange
+
 	" Task Waiting
-	syntax match TaskWaiting "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*\~\d+" contains=ExclamationMark,Info,Date
+	syntax match TaskWaiting "\v\s*-\s\[.{1}\]\s\zs.*\ze\s--\s.*\~\x{8}" contains=ExclamationMark,Info,Appointment,Code,Percentages
 	highlight link TaskWaiting String
-	" Task Done
-	syntax region TaskDone start="\v- \[x\]+" skip="\v^\t{1,}" end="^" contains=FlagID
-	" Task Failed	
+
+	" Task Done, also all of it's subtasks.
+	syntax region TaskDone start="\v^\t{0}- \[x\]+" skip="\v^\t{1,}" end="^" contains=FlagID
+
 	syntax match TaskFailedMarker "\v\[F\]" contained
 	highlight link TaskFailedMarker Error
-	syntax region TaskFailed start="\v- \[F\]+" skip="\v^\t{1,}" end="^" contains=TaskFailedMarker,FlagID
-	" Task Cancelled
+	syntax region TaskFailed start="\v^\t{0}- \[F\]+" skip="\v^\t{1,}" end="^" contains=TaskFailedMarker,FlagID
+
 	syntax match TaskCancelledMarker "\v\[-\]" contained
-	syntax region TaskCancelled start="\v- \[-\]+" skip="\v^\t{1,}" end="^" contains=TaskCancelledMarker,FlagID
-	" ... 
+	highlight link TaskCancelledMarker NerdTreeDir
+	syntax region TaskCancelled start="\v^\t{0}- \[-\]+" skip="\v^\t{1,}" end="^" contains=TaskCancelledMarker,FlagID
+
+	" highlight invalid task/note indicator
+	syntax match InvalidTaskNoteIndicator "\v^-\zs[^ -]\ze(\[.\])?"
+	highlight link InvalidTaskNoteIndicator Error
+
 	highlight link TaskDone NerdTreeDir
 	highlight link TaskFailed NerdTreeDir
 	highlight link TaskCancelled NerdTreeDir
 
 endfunction
 command! -nargs=0 VdoSetQfSyntax	:call s:SetQfSyntax()
+
+function! s:GTDView(where)
+	
+	" save cwd
+	let cwd_save = getcwd()
+	" save cfstack
+	call vimdoit_utility#SaveCfStack()
+	" save filter option
+	let filter_save        = s:filter['invert']
+	let s:filter['invert'] = v:false
+	
+	if a:where ==# 'project'
+		let where_msg = expand('%')
+	elseif a:where ==# 'area'
+		let where_msg = getcwd()
+	elseif a:where ==# 'root'
+		let where_msg = g:vimdoit_projectsdir
+	elseif a:where ==# 'quickfix'
+		let where_msg = 'quickfix'
+	endif
+
+	echom "Building GTD-View of ".shellescape(where_msg)."..."
+	
+	" create a list of files where to grep 
+	" and change working directories if necessary
+	if a:where ==# 'project'
+		let files        = shellescape(expand('%'))
+		let s:grep['preprocessor'] = ''
+	elseif a:where ==# 'area'
+		let files        = ''
+		let s:grep['preprocessor'] = '--pre '.g:vimdoit_plugindir.'/scripts/pre-project.sh'
+	elseif a:where ==# 'root'
+		let files        = ''
+		let s:grep['preprocessor'] = '--pre '.g:vimdoit_plugindir.'/scripts/pre-project.sh'
+		execute	'cd '.g:vimdoit_projectsdir
+	elseif a:where ==# 'quickfix'
+		let files        = join(map(s:GetFilesOfQfList(), 'shellescape(v:val)'), ' ')
+		let s:grep['preprocessor'] = ''
+	endif
+
+	let list = []
+	
+	function! QfAdd(list, text)
+		call add(a:list, {'text':a:text})
+	endfunction
+	
+	let headline = trim(system('figlet '.shellescape(where_msg)))
+	let headline = split(headline, '\n')
+	for i in headline
+		call QfAdd(list, i)
+	endfor
+
+
+	" grep current actions
+	call QfAdd(list, '')
+	call QfAdd(list, '=====================================')
+	call QfAdd(list, '=			    	Current Actions	 		   =')
+	call QfAdd(list, '=====================================')
+	call QfAdd(list, '')
+	
+	echom "Building list of current actions..."
+	let pattern = '\- \[ \]'
+	let qf      = s:Grep(pattern, files)
+	let current = s:FilterByTag('cur', copy(qf))
+	call sort(current, 's:CmpQfByPriority')
+	call extend(list, current)
+	echom "...done"
+
+	" grep next actions
+	call QfAdd(list, '')
+	call QfAdd(list, '=====================================')
+	call QfAdd(list, '=			    	  Next Actions  		   =')
+	call QfAdd(list, '=====================================')
+	call QfAdd(list, '')
+	
+	echom "Building list of next actions..."
+	let next = s:FilterByTag('next-?(\d+)?', copy(qf))
+	call sort(next, 's:CmpQfByPriority')
+	call extend(list, next)
+	echom "...done"
+	
+	" grep most important actions
+	call QfAdd(list, '')
+	call QfAdd(list, '======================================')
+	call QfAdd(list, '=	 	    Most important Actions  	  =')
+	call QfAdd(list, '======================================')
+	call QfAdd(list, '')
+	
+	echom "Building list most important actions..."
+	let most = copy(qf)
+	call sort(most, 's:CmpQfByPriority')
+	call extend(list, most[0:9])
+	echom "...done"
+	
+	" grep backlog actions
+	call QfAdd(list, '')
+	call QfAdd(list, '======================================')
+	call QfAdd(list, '=								Backlog				  	  =')
+	call QfAdd(list, '======================================')
+	call QfAdd(list, '')
+	
+	echom "Building list of backlog..."
+	let backlog = s:FilterByBacklog(copy(qf))
+	call sort(backlog, 's:CmpQfByPriority')
+	call extend(list, backlog)
+	echom "...done"
+	
+	" grep upcoming dates
+	call QfAdd(list, '')
+	call QfAdd(list, '======================================')
+	call QfAdd(list, '=						Upcoming Dates		  	  =')
+	call QfAdd(list, '======================================')
+	call QfAdd(list, '')
+	
+	echom "Building list of upcoming dates..."
+	" grep regular dates
+	let pat_dates_regular   = '\{('.s:p_days.')?'.s:p_date.'('.s:p_hour.')?\}'
+	let dates_regular       = s:Grep(pat_dates_regular, files)
+	let dates_regular_notes = s:FilterByNote(copy(dates_regular))
+	let dates_regular_tasks = s:FilterByStatus('todo', copy(dates_regular))
+	" grep dates with extended-ids
+	let pat_extended_ids = '\b'.s:p_id.s:p_id_ext.'\b'
+	let extended_ids     = s:Grep(pat_extended_ids, files)
+	" grep repetitions
+	let pat_repetitions   = '\{'.s:p_date.'('.s:p_hour.')?\\|'.s:p_rep.'(\\|'.s:p_date.'('.s:p_hour.')?)?\}'
+	let repetitions       = s:Grep(pat_repetitions, files)
+	let repetitions_notes = s:FilterByNote(copy(repetitions))
+	let repetitions_tasks = s:FilterByStatus('todo', copy(repetitions))
+	let repetitions       = extend(repetitions_notes, repetitions_tasks)
+	" expand repetitions
+	let gen = s:ExpandRepetitions(repetitions, extended_ids, '+2w')
+	" merge lists
+	let updates = []
+	call extend(updates, dates_regular_notes)
+	call extend(updates, dates_regular_tasks)
+	" filter false-positives
+	call filter(updates, function('s:FilByHasDate'))
+	" extend by auto-generated dates
+	call extend(updates, gen)
+	" sort by date
+	call sort(updates, 's:CmpQfByDate')
+	let updates = s:FilterByDate('NextTwoWeeks', updates)
+	call extend(list, updates)
+	echom "...done"
+	
+	" restore cfstack
+	call vimdoit_utility#RestoreCfStack()
+	" set final list
+	call setqflist(list)
+	call s:SetQfSyntax()
+	" restore cwd
+	execute 'cd '.cwd_save
+	" restore filter option
+	let s:filter['invert'] = filter_save
+	echom "...done"
+endfunction
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 "                               Filtering                               "
@@ -2585,7 +2792,17 @@ function! s:ToggleFilterOptions(char)
 	endif
 endfunction
 
-function! s:FilterByStatus(status)
+function! s:FilterByStatus(status, ...)
+	
+	" checking parameters
+	if a:0 == 0
+		let qf = getqflist()
+	elseif a:0 == 1
+		let qf = a:1
+	else
+		echoerr "Invalid number of arguments in s:FilterByStatus()!"
+	endif	
+
 	let s:filter['status'] = a:status
 	function! ByStatus(idx, val)
 		let status = s:ExtractStatus(a:val['text'])
@@ -2596,11 +2813,14 @@ function! s:FilterByStatus(status)
 		endif
 	endfunction
 	
-	let qf = getqflist()
 	call filter(qf, function('ByStatus'))
-	call setqflist(l:qf)
+	
+	if a:0 == 0
+		call setqflist(qf)
+	else
+		return qf
+	endif
 endfunction
-
 
 function! s:FilterByWaiting()
 	function! Waiting(idx, val)
@@ -2632,7 +2852,17 @@ function! s:FilterByBlocking()
 	call setqflist(l:qf)
 endfunction
 
-function! s:FilterByBacklog()
+function! s:FilterByBacklog(...)
+	
+	" checking parameters
+	if a:0 == 0
+		let qf = getqflist()
+	elseif a:0 == 1
+		let qf = a:1
+	else
+		echoerr "Invalid number of arguments in s:FilterByBacklog()!"
+	endif	
+	
 	function! ByStatus(idx, val)
 		let status = s:ExtractStatus(a:val['text'])
 		if status !=# 'todo'
@@ -2641,8 +2871,6 @@ function! s:FilterByBacklog()
 			return v:true
 		endif
 	endfunction
-	
-	let qf = getqflist()
 	
 	" filter all tasks which are not in projects in ./todo
 	let fil_1 = []
@@ -2694,11 +2922,26 @@ function! s:FilterByBacklog()
 	" sort by backlog date
 	call sort(fil_2, 's:CmpQfByBacklog')
 	
-	call setqflist(fil_2)
+	if a:0 == 0
+		call setqflist(fil_2)
+	else
+		return fil_2
+	endif
 endfunction
 
-function! s:FilterByTag(tag)
+function! s:FilterByTag(tag, ...)
+	
+	" checking parameters
+	if a:0 == 0
+		let list = getqflist()
+	elseif a:0 == 1
+		let list = a:1
+	else
+		echoerr "Invalid number of arguments in s:FilterByTag()!"
+	endif	
+			
 	let s:filter['tag'] = a:tag
+	
 	function! Tag(idx, val)
 
 		let tags = s:ExtractTags(a:val['text'])
@@ -2722,9 +2965,14 @@ function! s:FilterByTag(tag)
 		endif
 	endfunction
 	
-	let qf = getqflist()
-	call filter(qf, function('Tag'))
-	call setqflist(l:qf)
+	call filter(list, function('Tag'))
+	
+	if a:0 == 0
+		call setqflist(list)
+	else
+		return list
+	endif
+		
 endfunction
 
 function! s:FilterByUnique()
@@ -2759,7 +3007,16 @@ function! s:FilterByTask()
 	call setqflist(l:qf)
 endfunction
 
-function! s:FilterByNote()
+function! s:FilterByNote(...)
+	" checking parameters
+	if a:0 == 0
+		let qf = getqflist()
+	elseif a:0 == 1
+		let qf = a:1
+	else
+		echoerr "Invalid number of arguments in s:FilterByNote()!"
+	endif	
+	
 	function! ByNote(idx, val)
 		let res = s:IsLineNote(a:val['text'])
 		if res == v:true
@@ -2769,9 +3026,13 @@ function! s:FilterByNote()
 		endif
 	endfunction
 	
-	let qf = getqflist()
 	call filter(qf, function('ByNote'))
-	call setqflist(l:qf)
+	
+	if a:0 == 0
+		call setqflist(qf)
+	else
+		return qf
+	endif
 endfunction
 
 function! s:FilByHasDate(idx, val)
@@ -2814,7 +3075,17 @@ function! s:FilterByRepetition()
 	call setqflist(l:qf)
 endfunction
 
-function! s:FilterByDate(date)
+function! s:FilterByDate(date, ...)
+	
+	" checking parameters
+	if a:0 == 0
+		let qf = getqflist()
+	elseif a:0 == 1
+		let qf = a:1
+	else
+		echoerr "Invalid number of arguments in s:FilterByDate()!"
+	endif	
+	
 	function! Today(idx, val)
 		let date  = s:ExtractDate(a:val.text)
 		if empty(date) == v:true
@@ -2914,12 +3185,30 @@ function! s:FilterByDate(date)
 			return v:true
 		endif
 	endfunction
+
+	function! NextTwoWeeks(idx, val)
+		let date = s:ExtractDate(a:val['text'])
+		if empty(date) == v:true
+			return v:false
+		endif
+		let now_in_two_weeks = trim(system('dateadd today +2w'))
+		let now              = strftime('%Y-%m-%d')
+		if date['date'] >=# now && date['date'] <=# now_in_two_weeks
+			return v:true
+		else
+			return v:false
+		endif
+	endfunction
 	
-	let qf = getqflist()
 	call filter(qf, function(a:date))
 	" sort by date
 	call sort(qf, 's:CmpQfByDate')
-	call setqflist(qf)
+	
+	if a:0 == 0
+		call setqflist(qf)
+	else
+		return qf
+	endif
 endfunction
 
 
@@ -2930,7 +3219,7 @@ function! s:FilterPrompt()
 		return
 	endif
 		
-	echom 'Filter quickfix by:    [t]odo    [d]one    [c]ancelled    [f]ailed    [w]aiting    [b]locking    b[a]cklog    [u]nique    [n]ext    cu[r]rent    ta[s]k    n[o]te    dat[e]    [r]epetition    toda[y]    t[h]is week    ne[x]t week    this [m]onth    [p]ast    upcomin[g]    '.s:FilterModeMsg()
+	echom 'Filter quickfix by:    [t]odo    [d]one    [c]ancelled    [f]ailed    [w]aiting    [b]locking    b[a]cklog    [u]nique    [n]ext    cu[r]rent    ta[s]k    n[o]te    dat[e]    [R]epetition    toda[y]    t[h]is week    ne[x]t week    this [m]onth    [p]ast    upcomin[g]    '.s:FilterModeMsg()
 
 	try 
 		let char = nr2char(getchar())
@@ -2975,6 +3264,10 @@ function! s:FilterPrompt()
 		echom '...done'
 	elseif char ==# 'u'
 		echom 'Removing duplicates...'
+		if s:filter['invert'] == v:true
+			echoerr "Removing duplicates with option 'invert' not implemented! Abort."
+			return
+		endif
 		call s:FilterByUnique()
 		echom '...done'
 	elseif char ==# 'n'
@@ -2997,7 +3290,7 @@ function! s:FilterPrompt()
 		echom 'Filtering by "has date"...'
 		call s:FilterByHasDate()
 		echom '...done'
-	elseif char ==# 'r'
+	elseif char ==# 'R'
 		echom 'Filtering by "has repetition"...'
 		call s:FilterByRepetition()
 		echom '...done'
@@ -3625,7 +3918,7 @@ function! s:IsDateInList(haystack, needle)
 	return v:false
 endfunction
 
-function! s:GenerateDatesFromRepetition(line)
+function! s:GenerateDatesFromRepetition(line, limit)
 	
 	let dates = []
 	let rep   = s:ExtractRepetition(a:line)
@@ -3640,22 +3933,28 @@ function! s:GenerateDatesFromRepetition(line)
 	" Add repetitions into the future, but limit how many.
 	" We don't want to have too many dates in the lists, otherwise
 	" greping will be slowed down.
-	if rep['enddate'] == -1
-		let today = strftime('%Y-%m-%d')
 
-		if rep['operator'] ==# 'd'
-			let limit = trim(system('dateadd '.shellescape(today).' +3mo'))
-		elseif rep['operator'] ==# 'w'
-			let limit = trim(system('dateadd '.shellescape(today).' +6mo'))
-		elseif rep['operator'] ==# 'mo'
-			let limit = trim(system('dateadd '.shellescape(today).' +2y'))
-		elseif rep['operator'] ==# 'y'
-			let limit = trim(system('dateadd '.shellescape(today).' +30y'))
+	let today = strftime('%Y-%m-%d')
+	if a:limit ==# ''
+			
+		if rep['enddate'] == -1
+			if rep['operator'] ==# 'd'
+				let limit = trim(system('dateadd today +3mo'))
+			elseif rep['operator'] ==# 'w'
+				let limit = trim(system('dateadd today +6mo'))
+			elseif rep['operator'] ==# 'mo'
+				let limit = trim(system('dateadd today +2y'))
+			elseif rep['operator'] ==# 'y'
+				let limit = trim(system('dateadd today +30y'))
+			else
+				let limit = trim(system('dateadd today +3mo'))
+			endif
 		else
-			let limit = trim(system('dateadd '.shellescape(today).' +3mo'))
+			let limit = rep['enddate']
 		endif
+		
 	else
-		let limit = rep['enddate']
+		let limit = trim(system('dateadd today '.a:limit))
 	endif
 	
 	let cur = start
@@ -3941,6 +4240,12 @@ function! s:LoadMappings()
 
 		" create empty project in current directory
 		nnoremap <leader>np	:<c-u>call <SID>NewProject()<cr>
+
+		" gtd-view
+		nnoremap <leader>oo	:<c-u>call <SID>GTDView('project')<cr>
+		nnoremap <leader>o.	:<c-u>call <SID>GTDView('area')<cr>
+		nnoremap <leader>or	:<c-u>call <SID>GTDView('root')<cr>
+		nnoremap <leader>oq	:<c-u>call <SID>GTDView('quickfix')<cr>
 		
 		echom "Mappings loaded"
 		let b:vimdoit_did_load_mappings = 1
