@@ -43,7 +43,6 @@ endif
 "																Global Variables												   "
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
-let s:quickfix_type = 'none'
 let s:changedlines  = []
 let s:syntax_errors = []
 let s:parse_runtype = 'single'
@@ -1540,116 +1539,63 @@ endfunction
 "                              Sorting                                  "
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
+function! s:SortPrompt()
 
-function! s:SortQuickfix()
-	let selections = [
-				\ 'priority',
-				\ 'project',
-				\ 'date',
-				\ 'due date (only projects)',
-				\ 'start date (only projects)',
-				\ 'completion date (only projects)',
-				\ ]
-	let selections_dialog = [
-				\ '&priority',
-				\ 'p&roject',
-				\ '&date',
-				\ 'd&ue date (only projects)',
-				\ '&start date (only projects)',
-				\ '&completion date (only projects)',
-				\ ]
-	let input = confirm('Sort Quickfix List by', join(selections_dialog, "\n"))
-	
-	let l:qf = getqflist()
-	let title = s:GetQfTitle()
-
-	if selections[input-1] ==# 'priority'
-		echom "Sorting by Priority."
-		call sort(l:qf, 's:CmpQfByPriority')
-		let title = s:ModifyQfTitle(title, 'add', 'sort', 'priority')
-	elseif selections[input-1] ==# 'project'
-		call sort(l:qf, 's:CmpQfByProject')
-		echom "Sorting by Project"
-		let title = s:ModifyQfTitle(title, 'add', 'sort', 'project')
-	elseif selections[input-1] ==# 'date'
-		call sort(l:qf, 's:CmpQfByDate')
-		echom "Sorting by Date"
-		let title = s:ModifyQfTitle(title, 'add', 'sort', 'date')
-	elseif selections[input-1] ==# 'due date (only projects)'
-		if s:quickfix_type ==# 'project'
-			call sort(l:qf, 's:CmpQfByDueDate')
-			echom "Sorting by Due Date (Only Projects)"
-			let title = s:ModifyQfTitle(title, 'add', 'sort', 'due date')
-		else
-			echoe "Quickfix List is not of type project."	
-			return
-		endif
-	elseif selections[input-1] ==# 'start date (only projects)'
-		if s:quickfix_type ==# 'project'
-			call sort(l:qf, 's:CmpQfByStartDate')
-			echom "Sorting by Start Date (Only Projects)"
-			let title = s:ModifyQfTitle(title, 'add', 'sort', 'start date')
-		else
-			echoe "Quickfix List is not of type project."	
-			return
-		endif
-	elseif selections[input-1] ==# 'completion date (only projects)'
-		if s:quickfix_type ==# 'project'
-			call sort(l:qf, 's:CmpQfByCompletionDate')
-			echom "Sorting by Completion Date (Only Projects)"
-			let title = s:ModifyQfTitle(title, 'add', 'sort', 'completion date')
-		else
-			echoe "Quickfix List is not of type project."	
-			return
-		endif
+	if len(getqflist()) == 0
+		echom "Empty quickfix list. Nothing to do."
+		return
 	endif
-	
-	" replace list
-	call setqflist(l:qf, 'r')	
-	
-endfunction
 
-function! s:GetNumExclamations(str)
-	let l:pattern  = '\v!'
-	let l:marks  = []
-	call substitute(a:str, l:pattern, '\=add(l:marks, submatch(0))', 'g')
-	return len(l:marks)
+	echom 'Sort quickfix list by:    [p]riority    [d]ate    p[r]oject    [i]d'
+	
+	try 
+		let char = nr2char(getchar())
+	catch /^Vim:Interrupt$/
+		mode | return
+	endtry
+
+	mode
+
+	if char ==# 'p'
+		" sort by priority
+		echom "Sorting by priority..."
+		let qf = getqflist()
+		call sort(qf, 's:CmpQfByPriority')
+		echom "...done"
+	elseif char ==# 'd'
+		" sort by date
+		echom "Sorting by date..."
+		call s:FilterByHasDate()
+		let qf = getqflist()
+		call sort(qf, 's:CmpQfByDate')
+		echom "...done"
+	elseif char ==# 'r'
+		" sort by project
+		echom "Sorting by project..."
+		let qf = getqflist()
+		call sort(qf, 's:CmpQfByProject')
+		echom "...done"
+	elseif char ==# 'i'
+		" sort by id
+		echom "Sorting by id..."
+		let qf = getqflist()
+		call sort(qf, 's:CmpQfById')
+		echom "...done"
+	endif
+
+	call setqflist(qf, 'r')
+	" set syntax
+	call s:SetQfSyntax()
 endfunction
 
 function! s:CmpQfByPriority(e1, e2)
-	" TODO use s:ExtractPriority
-	let [t1, t2] = [s:GetNumExclamations(a:e1.text), s:GetNumExclamations(a:e2.text)]
+	let [t1, t2] = [s:ExtractPriority(a:e1.text), s:ExtractPriority(a:e2.text)]
 	return t1 ># t2 ? -1 : t1 ==# t2 ? 0 : 1
 endfunction
 
 function! s:CmpQfByProject(e1, e2)
-	let [t1, t2] = [bufname(a:e1.bufnr), bufname(a:e2.bufnr)]
+	let [t1, t2] = [bufname(a:e1['bufnr']), bufname(a:e2['bufnr'])]
 	return t1 ># t2 ? 1 : t1 ==# t2 ? 0 : -1
-endfunction
-
-" TODO remove
-function! s:GetDateOnly(str)
-	let l:pattern  = '\v\{.*\zs(\d{4}-\d{2}-\d{2})\ze.*\}'
-	let l:date  = []
-	call substitute(a:str, l:pattern, '\=add(l:date, submatch(0))', 'g')
-
-	if len(l:date) != 0
-		return trim(l:date[0])
-	else
-		return v:false
-	endif
-endfunction
-
-function! s:GetDateAndTime(str)
-	let l:pattern  = '\v\{.*\zs(\d{4}-\d{2}-\d{2}).*(\d{2}:\d{2})?\ze\}'
-	let l:date  = []
-	call substitute(a:str, l:pattern, '\=add(l:date, submatch(0))', 'g')
-
-	if len(l:date) != 0
-		return trim(l:date[0])
-	else
-		return v:false
-	endif
 endfunction
 
 function! s:CmpQfByDate(e1, e2)
@@ -1673,57 +1619,6 @@ endfunction
 
 function! s:CmpQfById(e1, e2)
 	let [t1, t2] = [s:ExtractId(a:e1.text), s:ExtractId(a:e2.text)]
-	return t1 ># t2 ? 1 : t1 ==# t2 ? 0 : -1
-endfunction
-
-function! s:GetDueDate(str)
-	let l:pattern  = '\v\%\zs(\d{4}-\d{2}-\d{2})\ze'
-	let l:date  = []
-	call substitute(a:str, l:pattern, '\=add(l:date, submatch(0))', 'g')
-
-	if len(l:date) != 0
-		return trim(l:date[0])
-	else
-		return v:false
-	endif
-endfunction
-
-function! s:CmpQfByDueDate(e1, e2)
-	let [t1, t2] = [s:GetDueDate(a:e1.text), s:GetDueDate(a:e2.text)]
-	return t1 ># t2 ? 1 : t1 ==# t2 ? 0 : -1
-endfunction
-
-function! s:GetStartDate(str)
-	let l:pattern  = '\v\^\zs(\d{4}-\d{2}-\d{2})\ze'
-	let l:date  = []
-	call substitute(a:str, l:pattern, '\=add(l:date, submatch(0))', 'g')
-
-	if len(l:date) != 0
-		return trim(l:date[0])
-	else
-		return v:false
-	endif
-endfunction
-
-function! s:CmpQfByStartDate(e1, e2)
-	let [t1, t2] = [s:GetStartDate(a:e1.text), s:GetStartDate(a:e2.text)]
-	return t1 ># t2 ? 1 : t1 ==# t2 ? 0 : -1
-endfunction
-
-function! s:GetCompletionDate(str)
-	let l:pattern  = '\v\$\zs(\d{4}-\d{2}-\d{2})\ze'
-	let l:date  = []
-	call substitute(a:str, l:pattern, '\=add(l:date, submatch(0))', 'g')
-
-	if len(l:date) != 0
-		return trim(l:date[0])
-	else
-		return v:false
-	endif
-endfunction
-
-function! s:CmpQfByCompletionDate(e1, e2)
-	let [t1, t2] = [s:GetCompletionDate(a:e1.text), s:GetCompletionDate(a:e2.text)]
 	return t1 ># t2 ? 1 : t1 ==# t2 ? 0 : -1
 endfunction
 
@@ -1790,24 +1685,25 @@ function! s:GrepPrompt(where)
 		mode | call s:GrepPrompt(a:where)	| return
 	endif
 
+	mode
+
 	if char ==# 'p'
 		" grep projects
-		mode | call s:GrepThings(a:where, 'projects')
+		call s:GrepThings(a:where, 'projects')
 	elseif char ==# 't'
 		" grep tasks
-		mode | call s:GrepThings(a:where, 'tasks')
+		call s:GrepThings(a:where, 'tasks')
 	elseif char ==# 'n'
 		" grep notes
-		mode | call s:GrepThings(a:where, 'notes')
+		call s:GrepThings(a:where, 'notes')
 	elseif char ==# 'd'
 		" grep dates
-		mode | call s:GrepThings(a:where, 'dates')
+		call s:GrepThings(a:where, 'dates')
 	elseif char ==# 'r'
 		" grep repetitions
-		mode | call s:GrepThings(a:where, 'repetitions')
+		call s:GrepThings(a:where, 'repetitions')
 	endif
 
-	mode
 endfunction
 
 function! s:Grep(pattern, files)
@@ -1823,7 +1719,7 @@ function! s:Grep(pattern, files)
 	" modify grep format
 	set grepformat^=%f:%l:%c:%m
 	" execute
-	execute cmd.' '.shellescape(a:pattern).' '.a:files | copen
+	silent execute cmd.' '.shellescape(a:pattern).' '.a:files | copen
 	" restore options
 	call vimdoit_utility#RestoreOptions()
 	" return
@@ -1905,8 +1801,6 @@ function! s:GrepThings(where, what)
 			mode | return
 		endif
 
-		let s:quickfix_type = 'projects'
-		
 	""""""""""""""
 	" grep tasks "
 	""""""""""""""
@@ -1941,9 +1835,6 @@ function! s:GrepThings(where, what)
 			mode | return
 		endif
 		
-		" set quickfix type
-		let s:quickfix_type = 'tasks'
-		
 	""""""""""""""
 	" grep notes "
 	""""""""""""""
@@ -1953,14 +1844,14 @@ function! s:GrepThings(where, what)
 		echom 'Grepping notes in '.shellescape(where_msg).':'
 		" pattern
 		let pattern = '^\s*\- [^\[]'
-		" set quickfix type
-		let s:quickfix_type = 'notes'
 		
 	""""""""""""""
 	" grep dates "
 	""""""""""""""
 	elseif a:what ==# 'dates'
 		
+		" message
+		echom 'Grepping dates in '.shellescape(where_msg).'...'
 		" save cfstack
 		call vimdoit_utility#SaveCfStack()
 		" grep regular dates
@@ -1986,10 +1877,9 @@ function! s:GrepThings(where, what)
 		call setqflist(all)
 		" set syntax
 		" call s:SetQfSyntax()
-		echom "...finished"
-		" set quickfix type
-		let s:quickfix_type = 'dates'
-
+		echom "...done"
+		" set syntax
+		call s:SetQfSyntax()
 		" restore cwd
 		execute 'cd '.cwd_save
 		return
@@ -1999,15 +1889,15 @@ function! s:GrepThings(where, what)
 	""""""""""""""""""""
 	elseif a:what ==# 'repetitions'
 		" message
-		echom 'Grepping repetitions in '.shellescape(where_msg).':'
+		echom 'Grepping repetitions in '.shellescape(where_msg).'...'
 		" pattern
 		let pattern = '\{'.s:p_date.'('.s:p_hour.')?\\|'.s:p_rep.'(\\|'.s:p_date.'('.s:p_hour.')?)?\}'
-		" set quickfix type
-		let s:quickfix_type = 'repetitions'
 	endif
 
 	call s:Grep(pattern, files)
-	" call s:SetQfSyntax()
+	" set syntax
+	call s:SetQfSyntax()
+	echom "...done"
 
 	" restore cwd
 	execute 'cd '.cwd_save
@@ -2111,6 +2001,7 @@ endfunction
 
 function! s:NicenQfByDate()
 
+	call s:FilterByHasDate()
 	let qf         = getqflist()
 	call sort(qf, 's:CmpQfByDate')
 	let idx        = 0
@@ -2168,7 +2059,9 @@ function! s:NicenQfByDate()
 	endwhile
 
 	call setqflist(qf)
-	
+	" set syntax
+	call s:SetQfSyntax()
+	mode | echom "Showing calendar view"
 endfunction
 
 let s:p_date   = '\d{4}-\d{2}-\d{2}'
@@ -2203,11 +2096,6 @@ function! s:GetQfList(pattern, path)
 endfunction
 
 function! s:JumpToToday()
-	" if s:quickfix_type !=# 'dates'
-	" 	echoe "Quickfix List is not of type date."
-	" 	return
-	" endif
-	
 	" jump to today
 	let today = strftime('%Y-%m-%d')
 	while search('\v'.today) == 0 
@@ -2223,8 +2111,8 @@ function! s:SetQfSyntax()
 	endif
 	
 	" :set conceallevel=2 concealcursor=nc
-	syntax match qfFileName "\v^.{-}\|\d+\scol\s\d+\|" conceal
-	syntax match Bars "\v^\|\|" conceal
+	" syntax match qfFileName "\v^.{-}\|\d+\scol\s\d+\|" conceal
+	" syntax match Bars "\v^\|\|" conceal
 
 	syntax match CalendarDateAndTime "\v\w*, \d{4}-\d{2}-\d{2}:"
 	highlight link CalendarDateAndTime Operator
@@ -2444,9 +2332,6 @@ function! s:FilterByTask()
 	let qf = getqflist()
 	call filter(qf, function('ByTask'))
 	call setqflist(l:qf)
-	if s:filter['invert'] == v:false
-		let s:quickfix_type = 'tasks'
-	endif
 endfunction
 
 function! s:FilterByNote()
@@ -2462,9 +2347,6 @@ function! s:FilterByNote()
 	let qf = getqflist()
 	call filter(qf, function('ByNote'))
 	call setqflist(l:qf)
-	if s:filter['invert'] == v:false
-		let s:quickfix_type = 'notes'
-	endif
 endfunction
 
 function! s:FilterByHasDate()
@@ -2480,10 +2362,6 @@ function! s:FilterByHasDate()
 	let qf = getqflist()
 	call filter(qf, function('ByDate'))
 	call setqflist(l:qf)
-
-	if s:filter['invert'] == v:false
-		let s:quickfix_type = 'dates'
-	endif
 endfunction
 
 function! s:FilterByRepetition()
@@ -2499,9 +2377,6 @@ function! s:FilterByRepetition()
 	let qf = getqflist()
 	call filter(qf, function('ByRepetition'))
 	call setqflist(l:qf)
-	if s:filter['invert'] == v:false
-		let s:quickfix_type = 'repetitions'
-	endif
 endfunction
 
 function! s:FilterByDate(date)
@@ -2633,50 +2508,92 @@ function! s:FilterPrompt()
 		mode | call s:FilterPrompt()	| return
 	endif
 
+	mode
+
 	if char ==# 't'
+		echom 'Filtering by "todo"...'
 		call s:FilterByStatus('todo')
+		echom '...done'
 	elseif char ==# 'd'
+		echom 'Filtering by "done"...'
 		call s:FilterByStatus('done')
+		echom '...done'
 	elseif char ==# 'c'
+		echom 'Filtering by "cancelled"...'
 		call s:FilterByStatus('cancelled')
+		echom '...done'
 	elseif char ==# 'f'
+		echom 'Filtering by "failed"...'
 		call s:FilterByStatus('failed')
+		echom '...done'
 	elseif char ==# 'w'
+		echom 'Filtering by "waiting"...'
 		call s:FilterByWaiting()
+		echom '...done'
 	elseif char ==# 'b'
+		echom 'Filtering by "blocking"...'
 		call s:FilterByBlocking()
+		echom '...done'
 	elseif char ==# 'a'
 		echoerr "Not implemented." | return
 		call s:FilterByBacklog()
+		echom '...done'
 	elseif char ==# 'u'
+		echom 'Removing duplicates...'
 		call s:FilterByUnique()
+		echom '...done'
 	elseif char ==# 'n'
+		echom "Filtering by next..."
 		call s:FilterByTag('next-?(\d+)?')
+		echom '...done'
 	elseif char ==# 'r'
+		echom "Filtering by current..."
 		call s:FilterByTag('cur')
+		echom '...done'
 	elseif char ==# 's'
+		echom "Filtering by tasks..."
 		call s:FilterByTask()
+		echom '...done'
 	elseif char ==# 'o'
+		echom "Filtering by notes..."
 		call s:FilterByNote()
+		echom '...done'
 	elseif char ==# 'e'
+		echom 'Filtering by "has date"...'
 		call s:FilterByHasDate()
+		echom '...done'
 	elseif char ==# 'r'
+		echom 'Filtering by "has repetition"...'
 		call s:FilterByRepetition()
+		echom '...done'
 	elseif char ==# 'y'
+		echom 'Filtering by "today"...'
 		call s:FilterByDate('Today')
+		echom '...done'
 	elseif char ==# 'h'
+		echom 'Filtering by "this week"...'
 		call s:FilterByDate('ThisWeek')
+		echom '...done'
 	elseif char ==# 'x'
+		echom 'Filtering by "next week"...'
 		call s:FilterByDate('NextWeek')
+		echom '...done'
 	elseif char ==# 'm'
+		echom 'Filtering by "this month"...'
 		call s:FilterByDate('ThisMonth')
+		echom '...done'
 	elseif char ==# 'p'
+		echom 'Filtering by "past"...'
 		call s:FilterByDate('Past')
+		echom '...done'
 	elseif char ==# 'g'
+		echom 'Filtering by "upcoming"...'
 		call s:FilterByDate('Upcoming')
+		echom '...done'
 	endif
 
-	mode
+	" set syntax
+	call s:SetQfSyntax()
 	
 endfunction
 
@@ -3544,6 +3461,7 @@ function! s:LoadMappings()
 
 	if exists("b:vimdoit_did_load_mappings") == v:false
 		echom "Loading mappings"
+		
 		" Grepping prompt
 		nnoremap <leader>gg	:<c-u>call <SID>GrepPrompt('project')<cr>
 		nnoremap <leader>g.	:<c-u>call <SID>GrepPrompt('area')<cr>
@@ -3551,11 +3469,14 @@ function! s:LoadMappings()
 		nnoremap <leader>gq	:<c-u>call <SID>GrepPrompt('quickfix')<cr>
 		
 		" Sort quickfix list
-		nnoremap <leader>qs	:<c-u>call <SID>SortQuickfix()<cr>
+		nnoremap <leader>qs	:<c-u>call <SID>SortPrompt()<cr>
 		" Filter quickfix list
-		nnoremap <leader>f	:<c-u>call <SID>FilterPrompt()<cr>
+		nnoremap <leader>qf	:<c-u>call <SID>FilterPrompt()<cr>
 		" Nicen Quickfix
-		nnoremap <leader>n	:<c-u>call <SID>NicenQfByDate()<cr>
+		nnoremap <leader>qn	:<c-u>call <SID>NicenQfByDate()<cr>
+		" Set Quickfix set
+		nnoremap <leader>qm :<c-u>call <SID>SetQfSyntax()<cr>
+		
 		" Modify Task Prompt (Normal)
 		nnoremap M	:<c-u>call <SID>ChangeTaskPrompt('char')<cr>
 		" Modify Task Prompt (Visual)
@@ -3564,12 +3485,15 @@ function! s:LoadMappings()
 		nnoremap R	:<c-u>call <SID>RemoveTaskPrompt('char')<cr>
 		" Remove Task Prompt (Visual)
 		vnoremap R	:<c-u>call <SID>RemoveTaskPrompt(visualmode())<cr>
+		
 		" Add Task Prompt (Normal)
 		nnoremap <leader>A	:<c-u>call <SID>AddTaskPrompt('char')<cr>
 		" Add Task Prompt (Visual)
 		vnoremap <leader>A	:<c-u>call <SID>AddTaskPrompt(visualmode())<cr>
+		
 		" Jump in Quickfix List to Today
 		nnoremap <leader>qj	:<c-u>call <SID>JumpToToday()<cr>
+		
 		" Yank Task Prompt (Normal)
 		nnoremap Y	:<c-u>call <SID>YankTaskPrompt()<cr>
 
@@ -3581,11 +3505,11 @@ function! s:LoadMappings()
 		nnoremap <leader>V	:<c-u>call <SID>ProcessFile('all')<cr>
 		
 		echom "Mappings loaded"
-
 		let b:vimdoit_did_load_mappings = 1
 	endif
 
 endfunction
+
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 "                             Autocommands                              "
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
