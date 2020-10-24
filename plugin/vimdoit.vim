@@ -1870,6 +1870,9 @@ function! s:GrepThings(where, what)
 		" merge lists
 		let all = []
 		call extend(all, dates_regular)
+		" filter false-positives
+		call filter(all, function('s:FilByHasDate'))
+		" extend by auto-generated dates
 		call extend(all, gen)
 		" sort by date
 		call sort(all, 's:CmpQfByDate')
@@ -1892,6 +1895,17 @@ function! s:GrepThings(where, what)
 		echom 'Grepping repetitions in '.shellescape(where_msg).'...'
 		" pattern
 		let pattern = '\{'.s:p_date.'('.s:p_hour.')?\\|'.s:p_rep.'(\\|'.s:p_date.'('.s:p_hour.')?)?\}'
+		" grep
+		let qf = s:Grep(pattern, files)
+		" filter false-positives
+		call filter(qf, function('s:FilByHasRepetition'))
+		" set qf
+		call setqflist(qf, 'r')
+		" set syntax
+		call s:SetQfSyntax()
+		" restore cwd
+		execute 'cd '.cwd_save
+		return
 	endif
 
 	call s:Grep(pattern, files)
@@ -2347,6 +2361,16 @@ function! s:FilterByNote()
 	let qf = getqflist()
 	call filter(qf, function('ByNote'))
 	call setqflist(l:qf)
+endfunction
+
+function! s:FilByHasDate(idx, val)
+	let date = s:ExtractDate(a:val['text'])
+	return empty(date) == v:true ? v:false : v:true
+endfunction
+
+function! s:FilByHasRepetition(idx, val)
+	let rep = s:ExtractRepetition(a:val['text'])
+	return empty(rep) == v:true ? v:false : v:true
 endfunction
 
 function! s:FilterByHasDate()
