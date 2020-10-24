@@ -174,7 +174,6 @@ function! s:InitBufferlist()
 	call s:SaveLocation()
 	execute 'argadd '.g:vimdoit_projectsdir.'/**/*.vdo '.g:vimdoit_projectsdir.'/**/.*.vdo'
 	call s:RestoreLocation()
-	echom "Initializing finished, vimdoit ready"
 endfunction
 
 " afer running `mv`, `rm`, `cp`, etc. we have to make sure 
@@ -195,6 +194,62 @@ function! s:UpdateBufferlist()
 	call s:SaveLocation()
 	execute 'args! '.g:vimdoit_projectsdir.'/**/*.vdo '.g:vimdoit_projectsdir.'/**/.*.vdo'
 	call s:RestoreLocation()
+endfunction
+
+function! s:CheckDirAndCreate(path)
+	if isdirectory(a:path) == v:false
+		let cmd = "mkdir -p ".shellescape(a:path)
+		echom cmd
+		call system(cmd)
+	endif
+endfunction
+
+function! s:CheckProjectAndCreate(project)
+	if filereadable(a:project) == v:false
+		let tpl = g:vimdoit_projectsdir.'/templates/project.vdo'
+		let cmd = 'cp '.shellescape(tpl).' '.shellescape(a:project) 
+		echom cmd
+		call system(cmd)
+	endif
+endfunction
+
+function! s:Symlink(source, target)
+	let cmd = 'ln -s '.shellescape(a:source).' '.shellescape(a:target)
+	echom cmd
+	call system(cmd)
+endfunction
+
+function! s:AutocreateProjects()
+	echom "Auto-creating projects"
+	
+	" check if projects for today, this week and this month exist
+	let today = strftime('%Y-%m-%d')
+	let year  = strftime('%Y')
+	let month = tolower(strftime('%B'))
+	let week  = strftime('%V')
+	let project_today = g:vimdoit_projectsdir.'/todo/'.year.'/'.today.'.vdo'
+	let project_week  = g:vimdoit_projectsdir.'/todo/'.year.'/kw-'.week.'.vdo'
+	let project_month = g:vimdoit_projectsdir.'/todo/'.year.'/'.month.'.vdo'
+	
+	" create directories
+	call s:CheckDirAndCreate(g:vimdoit_projectsdir.'/todo/'.year)
+	
+	" create projects
+	call s:CheckProjectAndCreate(project_month)
+	call s:CheckProjectAndCreate(project_week)
+	call s:CheckProjectAndCreate(project_today)
+	
+	" symlinks
+	call s:Symlink(project_today, g:vimdoit_projectsdir.'/todo/today.vdo')
+	call s:Symlink(project_week, g:vimdoit_projectsdir.'/todo/this-week.vdo')
+	call s:Symlink(project_month, g:vimdoit_projectsdir.'/todo/this-month.vdo')
+endfunction
+
+function! s:Init()
+	echom "Initializing..."
+	call s:InitBufferlist()
+	call s:AutocreateProjects()
+	echom "Initializing finished, vimdoit ready"
 endfunction
 
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -1087,6 +1142,11 @@ endfunction
 
 function! s:ExtractStatus(line)
 	let l:status = s:ExtractPatternFromString(a:line, s:patterns['status'])
+
+	if empty(l:status) == v:true
+		return -1
+	endif
+	
 	if l:status[0] ==# ' '
 		return 'todo'
 	elseif l:status[0] ==# 'x'
@@ -1672,7 +1732,7 @@ function! s:GrepPrompt(where)
 		let where_msg = 'quickfix'
 	endif
 	
-	echom 'Grepping in '.shellescape(where_msg).':    [p]rojects    [t]asks    [n]otes    [d]ates    [r]epetitions    '.s:GrepModeMsg()
+	echom 'Grepping in '.shellescape(where_msg).':    [p]rojects    [t]asks    [n]otes    [d]ates    [r]epetitions    b[a]cklog    '.s:GrepModeMsg()
 
 	try 
 		let char = nr2char(getchar())
@@ -1702,6 +1762,9 @@ function! s:GrepPrompt(where)
 	elseif char ==# 'r'
 		" grep repetitions
 		call s:GrepThings(a:where, 'repetitions')
+	elseif char ==# 'a'
+		" grep backlog
+		call s:GrepThings(a:where, 'backlog')
 	endif
 
 endfunction
@@ -1901,6 +1964,25 @@ function! s:GrepThings(where, what)
 		call filter(qf, function('s:FilByHasRepetition'))
 		" set qf
 		call setqflist(qf, 'r')
+		" set syntax
+		call s:SetQfSyntax()
+		" restore cwd
+		execute 'cd '.cwd_save
+		return
+	""""""""""""""""""""
+	" grep backlog "
+	""""""""""""""""""""
+	elseif a:what ==# 'backlog'
+		" message
+		echom 'Grepping backlog in '.shellescape(where_msg).'...'
+		" in backlog: never use any preprocessor
+		let s:grep['preprocessor'] = ''
+		" pattern
+		let pattern = '\- \[ \]'
+		" grep
+		call s:Grep(pattern, files)
+		" filter by backlog
+		call s:FilterByBacklog()
 		" set syntax
 		call s:SetQfSyntax()
 		" restore cwd
@@ -2286,6 +2368,49 @@ function! s:FilterByBlocking()
 	call setqflist(l:qf)
 endfunction
 
+function! s:FilterByBacklog()
+	function! ByStatus(idx, val)
+		let status = s:ExtractStatus(a:val['text'])
+		if status !=# 'todo'
+			return v:false
+		else
+			return v:true
+		endif
+	endfunction
+	
+	let qf = getqflist()
+	
+	" filter all tasks which are not in projects in ./todo
+	let fil_1 = []
+	for i in qf
+		let full = expand("#".i['bufnr'].":p")
+		let full_relative = substitute(full, '\v^'.g:vimdoit_projectsdir.'/', '', '')
+		if full_relative =~# '\v^todo'
+			call add(fil_1, i)
+		endif
+	endfor
+
+	" filter tasks with status `done`, `failed`, `cancelled`
+	" this will also filter notes, ...
+	call filter(fil_1, function('ByStatus'))
+
+	" filter all tasks which are not in projects with name `yyyy-mm-dd`
+	" and filter all tasks which are in projects with name of today
+	let fil_2 = []
+	let today = strftime("%Y-%m-%d")
+	for j in fil_1
+		let filename = expand("#".j['bufnr'].":t:r")
+		if filename =~# '\v'.s:pat_date && filename <# today
+			call add(fil_2, j)
+		endif
+	endfor
+
+	" sort by backlog date
+	call sort(fil_2, 's:CmpQfByProject')
+	
+	call setqflist(fil_2)
+endfunction
+
 function! s:FilterByTag(tag)
 	let s:filter['tag'] = a:tag
 	function! Tag(idx, val)
@@ -2559,7 +2684,7 @@ function! s:FilterPrompt()
 		call s:FilterByBlocking()
 		echom '...done'
 	elseif char ==# 'a'
-		echoerr "Not implemented." | return
+		echom 'Filtering by "backlog"...'
 		call s:FilterByBacklog()
 		echom '...done'
 	elseif char ==# 'u'
@@ -3545,9 +3670,9 @@ augroup VimDoit
 	autocmd BufEnter *.vdo call s:LoadMappings()
 
 	if v:vim_did_enter
-		call s:InitBufferlist()
+		call s:Init()
 	else
-		autocmd VimEnter * call s:InitBufferlist()
+		autocmd VimEnter * call s:Init()
 	endif
 augroup END
 
