@@ -764,12 +764,14 @@ function! s:GetNumOccurences(pat)
 endfunction
 
 function! s:NewID()	
+	echom "Generating new id..."
 	" generate ID
 	let l:id = s:GenerateID(8)
 	" check if ID is already in use
 	while s:GetNumOccurences('\v<0x'.l:id.'(\|\d+)?>') > 0
 		let l:id = trim(system('echo '.l:id.' | sha256sum'))[0:7]
 	endwhile 
+	echom "...done"
 	return l:id
 endfunction
 command! -nargs=? NewID	:call s:NewID()
@@ -789,7 +791,7 @@ endfunction
 function! s:ReplaceLineWithTask(task, lnum)
 	" change the level accordingly
 	let a:task['level'] = s:ExtractFromString(getline(a:lnum), {'level':1})['level']
-	call setline(a:lnum, s:CompileTaskString(a:task))
+	call setline(a:lnum, s:TaskToStr(a:task))
 endfunction
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -2011,7 +2013,7 @@ function! s:GenerateTasks(dates, line)
 		let tmp['date']['weekday'] = -1
 		let tmp['id']              = tmp['id'].'|'.id_extension[idx]
 		let idx                    = idx + 1
-		call add(list, s:CompileTaskString(tmp))
+		call add(list, s:TaskToStr(tmp))
 	endfor
 	return list
 endfunction
@@ -3081,15 +3083,15 @@ function! s:RemoveTaskPrompt(type)
 	endif
 	
 	if char ==# 'a'
-		call s:RemoveTaskDate(lines) | execute "normal i\<esc>"
+		call s:RemoveTaskDate(lines)
 	elseif char ==# 'm'
-		call s:RemoveTaskTime(lines) | execute "normal i\<esc>"
+		call s:RemoveTaskTime(lines)
 	elseif char ==# 'w'
-		call s:RemoveTaskWaiting(lines) | execute "normal i\<esc>"
+		call s:RemoveTaskWaiting(lines)
 	elseif char ==# 'b'
-		call s:RemoveTaskBlocking(lines) | execute "normal i\<esc>"
+		call s:RemoveTaskBlocking(lines)
 	elseif char ==# 'i'
-		call s:RemoveTaskId(lines) | execute "normal i\<esc>"
+		call s:RemoveTaskId(lines)
 	endif
 endfunction
 
@@ -3106,23 +3108,23 @@ function! s:ChangeTaskPrompt(type)
 	endif
 	
 	if char ==# 'd'
-		call s:ModifyTaskStatus('done', lines) | execute "normal i\<esc>"
+		call s:ModifyTaskStatus('done', lines)
 	elseif char ==# 't'
-		call s:ModifyTaskStatus('todo', lines) | execute "normal i\<esc>"
+		call s:ModifyTaskStatus('todo', lines)
 	elseif char ==# 'f'
-		call s:ModifyTaskStatus('failed', lines) | execute "normal i\<esc>"
+		call s:ModifyTaskStatus('failed', lines)
 	elseif char ==# 'c'
-		call s:ModifyTaskStatus('cancelled', lines) | execute "normal i\<esc>"
+		call s:ModifyTaskStatus('cancelled', lines)
 	elseif char ==# 'p'
-		call s:ModifyTaskPriority(lines) | execute "normal i\<esc>"
+		call s:ModifyTaskPriority(lines)
 	elseif char ==# 'a'
-		call s:ModifyTaskDate(lines) | execute "normal i\<esc>"
+		call s:ModifyTaskDate(lines)
 	elseif char ==# 'm'
-		call s:ModifyTaskTime(lines) | execute "normal i\<esc>"
+		call s:ModifyTaskTime(lines)
 	elseif char ==# 'i'
-		call s:ModifyTaskAction(lines) | execute "normal i\<esc>"
+		call s:ModifyTaskAction(lines)
 	elseif char ==# 'y'
-		call s:ModifyTaskType(lines) | execute "normal i\<esc>"
+		call s:ModifyTaskType(lines)
 	endif
 endfunction
 
@@ -3139,11 +3141,11 @@ function! s:AddTaskPrompt(type)
 	endif
 	
 	if char ==# 'i'
-		call s:AddTaskAction(lines) | execute "normal i\<esc>"
+		call s:AddTaskAction(lines)
 	elseif char ==# 'w'
-		call s:AddTaskWaiting(lines) | execute "normal i\<esc>"
+		call s:AddTaskWaiting(lines)
 	elseif char ==# 'b'
-		call s:AddTaskBlocking(lines) | execute "normal i\<esc>"
+		call s:AddTaskBlocking(lines)
 	endif
 endfunction
 
@@ -3165,7 +3167,7 @@ endfunction
 "												String/Line Manipulation 												"
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
-function! s:CompileTaskString(task)
+function! s:TaskToStr(task)
 	let str = ''
 	let t   = deepcopy(a:task)
 	let lut = {
