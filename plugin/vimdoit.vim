@@ -290,7 +290,7 @@ function! s:AutoCreateWeeks(start, end)
 	while cur <=# a:end
 		let year  = trim(system('date +%Y --date '.cur))
 		let week  = trim(system('date +%V --date '.cur))
-		call s:CreateProject(g:vimdoit_projectsdir.'/todo/'.year, 'kw-'.week.'.vdo', ' KW-'.week.' '.year)
+		call s:CreateProject(g:vimdoit_projectsdir.'/todo/'.year, 'kw-'.week.'.vdo', 'KW-'.week.' '.year)
 		let cur = trim(system('dateadd '.shellescape(cur).' +1w'))
 	endwhile
 endfunction
@@ -301,7 +301,8 @@ function! s:AutoCreateMonths(start, end)
 	while cur <=# a:end
 		let year      = trim(system('date +%Y --date '.cur))
 		let monthname = trim(system('date +%B --date '.cur))
-		call s:CreateProject(g:vimdoit_projectsdir.'/todo/'.year, tolower(monthname).'.vdo', monthname.' '.year)
+		let monthnum  = trim(system('date +%m --date '.cur))
+		call s:CreateProject(g:vimdoit_projectsdir.'/todo/'.year, monthnum.'-'.tolower(monthname).'.vdo', monthname.' '.year)
 		let cur = trim(system('dateadd '.shellescape(cur).' +1mo'))
 	endwhile
 endfunction
@@ -1903,6 +1904,47 @@ function! s:CmpQfById(e1, e2)
 	return t1 ># t2 ? 1 : t1 ==# t2 ? 0 : -1
 endfunction
 
+function! s:CmpQfByBacklog(e1, e2)	
+	let filename1 = expand("#".a:e1['bufnr'].":t:r")
+	let filename2 = expand("#".a:e2['bufnr'].":t:r")
+	let filename_rel1 = substitute(expand("#".a:e1['bufnr'].":p"), '\v'.g:vimdoit_projectsdir.'/todo/', '', '')
+	let filename_rel2 = substitute(expand("#".a:e2['bufnr'].":p"), '\v'.g:vimdoit_projectsdir.'/todo/', '', '')
+
+	" is the filename in the form of a daily-project?
+	if filename1 =~# '\v'.s:pat_date
+		let date1 = filename1
+	endif
+	if filename2 =~# '\v'.s:pat_date
+		let date2 = filename2
+	endif
+
+	" is the filename in the form a weekly-project?
+	if filename1 =~# '\vkw\-\d{2}'
+		let f1_week = substitute(filename1, '\vkw\-', '', '')
+		let f1_year = substitute(filename_rel1, '\v^\d{4}\zs.*\ze', '', '')
+		let date1   = trim(system('dateconv -f "%Y-%m-%d" -i "%Y-%V" '.shellescape(f1_year.'-'.f1_week)))
+	endif
+	if filename2 =~# '\vkw\-\d{2}'
+		let f2_week = substitute(filename2, '\vkw\-', '', '')
+		let f2_year = substitute(filename_rel2, '\v^\d{4}\zs.*\ze', '', '')
+		let date2   = trim(system('dateconv -f "%Y-%m-%d" -i "%Y-%V" '.shellescape(f2_year.'-'.f2_week)))
+ 	endif
+
+	" is the filename in the form of a monthly-project?
+	if filename1 =~# '\v\d{2}\-(januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember)'
+		let f1_month = substitute(filename1, '\v^\d{2}\zs.*\ze', '', '')
+		let f1_year  = substitute(filename_rel1, '\v^\d{4}\zs.*\ze', '', '')
+		let date1    = f1_year."-".f1_month."-00"
+	endif
+	if filename2 =~# '\v\d{2}\-(januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember)'
+		let f2_month = substitute(filename2, '\v^\d{2}\zs.*\ze', '', '')
+		let f2_year  = substitute(filename_rel2, '\v^\d{4}\zs.*\ze', '', '')
+		let date2    = f2_year."-".f2_month."-00"
+	endif
+	
+	return date1 ># date2 ? 1 : date1 ==# date2 ? 0 : -1
+endfunction
+
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 "                              Grepping                                 "
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -2196,8 +2238,9 @@ function! s:GrepThings(where, what)
 	elseif a:what ==# 'backlog'
 		" message
 		echom 'Grepping backlog in '.shellescape(where_msg).'...'
+		" TODO remove completely
 		" in backlog: never use any preprocessor
-		let s:grep['preprocessor'] = ''
+		" let s:grep['preprocessor'] = ''
 		" pattern
 		let pattern = '\- \[ \]'
 		" grep
@@ -2615,19 +2658,41 @@ function! s:FilterByBacklog()
 	" this will also filter notes, ...
 	call filter(fil_1, function('ByStatus'))
 
-	" filter all tasks which are not in projects with name `yyyy-mm-dd`
-	" and filter all tasks which are in projects with name of today
-	let fil_2 = []
-	let today = strftime("%Y-%m-%d")
+	let fil_2     = []
+	let today     = strftime("%Y-%m-%d")
+	let thisweek  = strftime('%V')
+	let thismonth = strftime('%m')
+	let thisyear  = strftime('%Y')
+	
 	for j in fil_1
-		let filename = expand("#".j['bufnr'].":t:r")
+		let filename     = expand("#".j['bufnr'].":t:r")
+		let filename_rel = substitute(expand("#".j['bufnr'].":p"), '\v'.g:vimdoit_projectsdir.'/todo/', '', '')
+		let yearnum  = substitute(filename_rel, '\v^\d{4}\zs.*\ze', '', '')
+		
+		" check if the task is in a weekly-project and filter the current week
+		if filename =~# '\vkw\-\d{2}'
+			let weeknum = substitute(filename, '\vkw\-', '', '')
+			if weeknum <# thisweek && yearnum <=# thisyear
+				call add(fil_2, j)
+			endif
+		endif
+		
+		" check if the task is in a monthly-project and filter the current month
+		if filename =~# '\v\d{2}\-(januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember)'
+			let monthnum = substitute(filename, '\v^\d{2}\zs.*\ze', '', '')
+			if monthnum <# thismonth && yearnum <=# thisyear
+				call add(fil_2, j)
+			endif
+		endif
+		
+		" check if the task is in a daily-project and filter the current day
 		if filename =~# '\v'.s:pat_date && filename <# today
 			call add(fil_2, j)
 		endif
 	endfor
 
 	" sort by backlog date
-	call sort(fil_2, 's:CmpQfByProject')
+	call sort(fil_2, 's:CmpQfByBacklog')
 	
 	call setqflist(fil_2)
 endfunction
@@ -3890,7 +3955,7 @@ augroup VimDoit
 	autocmd!
 	" autocmd ShellCmdPost * call s:UpdateBufferlist()
 	" autocmd TextChanged *.vdo call s:TextChanged()
-	autocmd BufWritePre,BufLeave *.vdo call s:ProcessFile('all')
+	autocmd BufWritePre *.vdo call s:ProcessFile('all')
 	autocmd BufEnter *.vdo call s:LoadMappings()
 
 	if v:vim_did_enter
