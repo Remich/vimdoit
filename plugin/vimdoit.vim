@@ -213,42 +213,261 @@ function! s:CheckProjectAndCreate(project)
 	endif
 endfunction
 
-function! s:Symlink(source, target)
-	let cmd = 'ln -s '.shellescape(a:source).' '.shellescape(a:target)
-	echom cmd
-	call system(cmd)
+function! s:Symlink(target, source)
+	let cmd1 = 'rm '.shellescape(a:source)
+	echom cmd1
+	call system(cmd1)
+	let cmd2 = 'ln -s '.shellescape(a:target).' '.shellescape(a:source)
+	echom cmd2
+	call system(cmd2)
+endfunction
+
+function! s:NewProject()
+	let filename = s:Input('Enter filename: ')
+	if filename ==# ''
+		echoerr "No filename supplied. Abort."
+		return
+	endif
+
+	if filereadable(getcwd().'/'.filename.'.vdo') == v:true
+		echoerr 'Project '.getcwd().'/'.filename.'.vdo already exists!'
+		return
+	endif
+
+	call s:CreateProject(getcwd(), filename.'.vdo', 'New Project')
+	execute 'edit! '.filename.'.vdo'
+endfunction
+
+
+command! -nargs=0 CreateProject	:call s:CreateProject('./', 'dummy.vdo', 'Dummy')
+function! s:CreateProject(path, filename, title)
+	call s:SaveLocation()
+	
+	" check if path exists, if not create it
+	if isdirectory(a:path) == v:false
+		echom "creating directory ".a:path
+		call system('mkdir -p '.a:path)
+	endif
+	
+	" don't overwrite existing ones
+	let file = a:path.'/'.a:filename
+	if filereadable(file) == v:true
+		return
+	endif
+
+	echom "Creating empty project ".file
+	
+	execute "edit! ".file
+	let lines = [
+				\'<'.a:title.'>',
+				\'',
+				\'														 I am a template vision',
+				\'',
+				\'==============================================================================',
+				\'<Tasks>',
+				\'',
+				\'- [ ] Dummy task of '.a:title,
+				\]
+	call append(0, lines)
+	silent write!
+	call s:RestoreLocation()
+endfunction
+
+function! s:AutoCreateDays(start, end)
+	echom "Autocreating daily projects from ".a:start." to ".a:end
+	let cur  = a:start
+	while cur <=# a:end
+		let year    = trim(system('date +%Y --date '.cur))
+		let weekday = trim(system('date +%A --date '.cur))
+		call s:CreateProject(g:vimdoit_projectsdir.'/todo/'.year, cur.'.vdo', weekday.' '.cur)
+		let cur = trim(system('dateadd '.shellescape(cur).' +1d'))
+	endwhile
+endfunction
+
+function! s:AutoCreateWeeks(start, end)
+	echom "Autocreating weekly projects from ".a:start." to ".a:end
+	let cur     = a:start
+	while cur <=# a:end
+		let year  = trim(system('date +%Y --date '.cur))
+		let week  = trim(system('date +%V --date '.cur))
+		call s:CreateProject(g:vimdoit_projectsdir.'/todo/'.year, 'kw-'.week.'.vdo', ' KW-'.week.' '.year)
+		let cur = trim(system('dateadd '.shellescape(cur).' +1w'))
+	endwhile
+endfunction
+
+function! s:AutoCreateMonths(start, end)
+	echom "Autocreating monthly projects from ".a:start." to ".a:end
+	let cur  = a:start
+	while cur <=# a:end
+		let year      = trim(system('date +%Y --date '.cur))
+		let monthname = trim(system('date +%B --date '.cur))
+		call s:CreateProject(g:vimdoit_projectsdir.'/todo/'.year, tolower(monthname).'.vdo', monthname.' '.year)
+		let cur = trim(system('dateadd '.shellescape(cur).' +1mo'))
+	endwhile
+endfunction
+
+function! s:SymlinkProjects()
+	" heute
+	let name   = 'heute'
+	let date   = strftime('%Y-%m-%d')
+	let year   = trim(system('date +%Y --date '.shellescape(date)))
+	let source = g:vimdoit_projectsdir.'/todo/'.year.'/'.tolower(date).'.vdo'
+	let target = g:vimdoit_projectsdir.'/todo/'.name.'.vdo'
+	call s:Symlink(source, target)
+	" gestern
+	let name   = 'gestern'
+	let date   = trim(system('dateadd today -1d'))
+	let year   = trim(system('date +%Y --date '.shellescape(date)))
+	let source = g:vimdoit_projectsdir.'/todo/'.year.'/'.tolower(date).'.vdo'
+	let target = g:vimdoit_projectsdir.'/todo/'.name.'.vdo'
+	call s:Symlink(source, target)
+	" vorgestern
+	let name   = 'vorgestern'
+	let date   = trim(system('dateadd today -2d'))
+	let year   = trim(system('date +%Y --date '.shellescape(date)))
+	let source = g:vimdoit_projectsdir.'/todo/'.year.'/'.tolower(date).'.vdo'
+	let target = g:vimdoit_projectsdir.'/todo/'.name.'.vdo'
+	call s:Symlink(source, target)
+	" morgen
+	let name   = 'morgen'
+	let date   = trim(system('dateadd today +1d'))
+	let year   = trim(system('date +%Y --date '.shellescape(date)))
+	let source = g:vimdoit_projectsdir.'/todo/'.year.'/'.tolower(date).'.vdo'
+	let target = g:vimdoit_projectsdir.'/todo/'.name.'.vdo'
+	call s:Symlink(source, target)
+	" übermorgen
+	let name   = 'uebermorgen'
+	let date   = trim(system('dateadd today +2d'))
+	let year   = trim(system('date +%Y --date '.shellescape(date)))
+	let source = g:vimdoit_projectsdir.'/todo/'.year.'/'.tolower(date).'.vdo'
+	let target = g:vimdoit_projectsdir.'/todo/'.name.'.vdo'
+	call s:Symlink(source, target)
+	" montag
+	let name   = 'montag'
+	let date   = trim(system('dateround today monday'))
+	let year   = trim(system('date +%Y --date '.shellescape(date)))
+	let source = g:vimdoit_projectsdir.'/todo/'.year.'/'.tolower(date).'.vdo'
+	let target = g:vimdoit_projectsdir.'/todo/'.name.'.vdo'
+	call s:Symlink(source, target)
+	" dienstag
+	let name   = 'dienstag'
+	let date   = trim(system('dateround today dienstag'))
+	let year   = trim(system('date +%Y --date '.shellescape(date)))
+	let source = g:vimdoit_projectsdir.'/todo/'.year.'/'.tolower(date).'.vdo'
+	let target = g:vimdoit_projectsdir.'/todo/'.name.'.vdo'
+	call s:Symlink(source, target)
+	" mittwoch
+	let name   = 'mittwoch'
+	let date   = trim(system('dateround today wednesday'))
+	let year   = trim(system('date +%Y --date '.shellescape(date)))
+	let source = g:vimdoit_projectsdir.'/todo/'.year.'/'.tolower(date).'.vdo'
+	let target = g:vimdoit_projectsdir.'/todo/'.name.'.vdo'
+	call s:Symlink(source, target)
+	" donnerstag
+	let name   = 'donnerstag'
+	let date   = trim(system('dateround today thursday'))
+	let year   = trim(system('date +%Y --date '.shellescape(date)))
+	let source = g:vimdoit_projectsdir.'/todo/'.year.'/'.tolower(date).'.vdo'
+	let target = g:vimdoit_projectsdir.'/todo/'.name.'.vdo'
+	call s:Symlink(source, target)
+	" freitag
+	let name   = 'freitag'
+	let date   = trim(system('dateround today friday'))
+	let year   = trim(system('date +%Y --date '.shellescape(date)))
+	let source = g:vimdoit_projectsdir.'/todo/'.year.'/'.tolower(date).'.vdo'
+	let target = g:vimdoit_projectsdir.'/todo/'.name.'.vdo'
+	call s:Symlink(source, target)
+	" samstag
+	let name   = 'samstag'
+	let date   = trim(system('dateround today saturday'))
+	let year   = trim(system('date +%Y --date '.shellescape(date)))
+	let source = g:vimdoit_projectsdir.'/todo/'.year.'/'.tolower(date).'.vdo'
+	let target = g:vimdoit_projectsdir.'/todo/'.name.'.vdo'
+	call s:Symlink(source, target)
+	" sonntag
+	let name   = 'sonntag'
+	let date   = trim(system('dateround today sunday'))
+	let year   = trim(system('date +%Y --date '.shellescape(date)))
+	let source = g:vimdoit_projectsdir.'/todo/'.year.'/'.tolower(date).'.vdo'
+	let target = g:vimdoit_projectsdir.'/todo/'.name.'.vdo'
+	call s:Symlink(source, target)
+	" diese woche
+	let name   = 'diese-woche'
+	let week   = strftime('%V')
+	let year   = trim(system('date +%Y'))
+	let source = g:vimdoit_projectsdir.'/todo/'.year.'/kw-'.tolower(week).'.vdo'
+	let target = g:vimdoit_projectsdir.'/todo/'.name.'.vdo'
+	call s:Symlink(source, target)
+	" letzte woche
+	let name   = 'letzte-woche'
+	let date   = trim(system('dateadd today -1w'))
+	let week   = trim(system('date +%V --date '.shellescape(date)))
+	let year   = trim(system('date +%Y --date '.shellescape(date)))
+	let source = g:vimdoit_projectsdir.'/todo/'.year.'/kw-'.tolower(week).'.vdo'
+	let target = g:vimdoit_projectsdir.'/todo/'.name.'.vdo'
+	call s:Symlink(source, target)
+	" naechste woche
+	let name   = 'naechste-woche'
+	let date   = trim(system('dateadd today +1w'))
+	let week   = trim(system('date +%V --date '.shellescape(date)))
+	let year   = trim(system('date +%Y --date '.shellescape(date)))
+	let source = g:vimdoit_projectsdir.'/todo/'.year.'/kw-'.tolower(week).'.vdo'
+	let target = g:vimdoit_projectsdir.'/todo/'.name.'.vdo'
+	call s:Symlink(source, target)
+	" dieser monat
+	let name   = 'dieser-monat'
+	let month   = strftime('%B')
+	let year   = trim(system('date +%Y'))
+	let source = g:vimdoit_projectsdir.'/todo/'.year.'/kw-'.tolower(month).'.vdo'
+	let target = g:vimdoit_projectsdir.'/todo/'.name.'.vdo'
+	call s:Symlink(source, target)
+	" naechster monat
+	let name   = 'naechster-monat'
+	let date   = trim(system('dateadd today +1mo'))
+	let month   = trim(system('date +%B --date '.shellescape(date)))
+	let year   = trim(system('date +%Y --date '.shellescape(date)))
+	let source = g:vimdoit_projectsdir.'/todo/'.year.'/kw-'.tolower(month).'.vdo'
+	let target = g:vimdoit_projectsdir.'/todo/'.name.'.vdo'
+	call s:Symlink(source, target)
+	" letzter monat
+	let name   = 'letzter-monat'
+	let date   = trim(system('dateadd today -1mo'))
+	let month   = trim(system('date +%B --date '.shellescape(date)))
+	let year   = trim(system('date +%Y --date '.shellescape(date)))
+	let source = g:vimdoit_projectsdir.'/todo/'.year.'/kw-'.tolower(month).'.vdo'
+	let target = g:vimdoit_projectsdir.'/todo/'.name.'.vdo'
+	call s:Symlink(source, target)
 endfunction
 
 function! s:AutocreateProjects()
 	echom "Auto-creating projects"
-	
-	" check if projects for today, this week and this month exist
+
 	let today = strftime('%Y-%m-%d')
-	let year  = strftime('%Y')
-	let month = tolower(strftime('%B'))
-	let week  = strftime('%V')
-	let project_today = g:vimdoit_projectsdir.'/todo/'.year.'/'.today.'.vdo'
-	let project_week  = g:vimdoit_projectsdir.'/todo/'.year.'/kw-'.week.'.vdo'
-	let project_month = g:vimdoit_projectsdir.'/todo/'.year.'/'.month.'.vdo'
-	
-	" create directories
-	call s:CheckDirAndCreate(g:vimdoit_projectsdir.'/todo/'.year)
-	
-	" create projects
-	call s:CheckProjectAndCreate(project_month)
-	call s:CheckProjectAndCreate(project_week)
-	call s:CheckProjectAndCreate(project_today)
-	
-	" symlinks
-	call s:Symlink(project_today, g:vimdoit_projectsdir.'/todo/today.vdo')
-	call s:Symlink(project_week, g:vimdoit_projectsdir.'/todo/this-week.vdo')
-	call s:Symlink(project_month, g:vimdoit_projectsdir.'/todo/this-month.vdo')
+	let start = trim(system('dateadd '.shellescape(today).' -3mo'))
+	let end   = trim(system('dateadd '.shellescape(today).' +3mo'))
+	call s:AutoCreateDays(start, end)
+	call s:AutoCreateWeeks(start, end)
+	call s:AutoCreateMonths(start, end)
+	call s:SymlinkProjects()
+endfunction
+
+function! s:PrepareLayout()
+	execute 'edit ./todo/heute.vdo'
+	setfiletype vimdoit
+	call s:LoadMappings()
+	vsplit
+	execute 'edit ./todo/diese-woche.vdo'
+	setfiletype vimdoit
+	call s:LoadMappings()
+	1 wincmd w
+	normal! G
 endfunction
 
 function! s:Init()
 	echom "Initializing..."
 	call s:InitBufferlist()
 	call s:AutocreateProjects()
+	call s:PrepareLayout()
 	echom "Initializing finished, vimdoit ready"
 endfunction
 
@@ -3654,6 +3873,9 @@ function! s:LoadMappings()
 		vnoremap <leader>v	:<c-u>call <SID>ProcessFile('visual')<cr>
 		" process whole file
 		nnoremap <leader>V	:<c-u>call <SID>ProcessFile('all')<cr>
+
+		" create empty project in current directory
+		nnoremap <leader>np	:<c-u>call <SID>NewProject()<cr>
 		
 		echom "Mappings loaded"
 		let b:vimdoit_did_load_mappings = 1
@@ -3668,7 +3890,7 @@ augroup VimDoit
 	autocmd!
 	" autocmd ShellCmdPost * call s:UpdateBufferlist()
 	" autocmd TextChanged *.vdo call s:TextChanged()
-	autocmd BufWritePre *.vdo call s:ProcessFile('all')
+	autocmd BufWritePre,BufLeave *.vdo call s:ProcessFile('all')
 	autocmd BufEnter *.vdo call s:LoadMappings()
 
 	if v:vim_did_enter
