@@ -1954,7 +1954,7 @@ function! s:CmpQfByBacklog(e1, e2)
 		let f2_year  = substitute(filename_rel2, '\v^\d{4}\zs.*\ze', '', '')
 		let date2    = f2_year."-".f2_month."-00"
 	endif
-	
+
 	return date1 ># date2 ? 1 : date1 ==# date2 ? 0 : -1
 endfunction
 
@@ -2261,15 +2261,37 @@ function! s:GrepThings(where, what)
 	elseif a:what ==# 'backlog'
 		" message
 		echom 'Grepping backlog in '.shellescape(where_msg).'...'
-		" TODO remove completely
-		" in backlog: never use any preprocessor
-		" let s:grep['preprocessor'] = ''
 		" pattern
 		let pattern = '\- \[ \]'
-		" grep
-		call s:Grep(pattern, files)
-		" filter by backlog
-		call s:FilterByBacklog()
+		
+		" FASTER: if `a:where` is `root` or `g:vimdoit_projectsdir` 
+		" we don't need to filter anything and can simply list all tasks in `todo/`
+		if a:where ==# 'root'
+					\ || (a:where ==# 'area' && getcwd() ==# g:vimdoit_projectsdir)
+			" the fast way:
+
+			" use backlog preprocessor
+			let s:grep['preprocessor'] = '--pre '.g:vimdoit_plugindir.'/scripts/pre-backlog.sh'
+			" save cwd
+			let cwd_save = getcwd()
+			execute 'cd '.g:vimdoit_projectsdir.'/todo'
+			" grep
+			let backlog = s:Grep(pattern, files)
+			" restore cwd
+			execute 'cd '.cwd_save
+		else
+			" the slower way (computing intersection):
+
+			" grep
+			let todo = s:Grep(pattern, files)
+			" filter by backlog
+			let backlog = s:FilterByBacklog(todo)
+		endif
+		
+		" sort by backlog date
+		call sort(backlog, 's:CmpQfByBacklog')
+		" set list
+		call setqflist(backlog)
 		" set syntax
 		call s:SetQfSyntax()
 		" restore cwd
@@ -2656,12 +2678,15 @@ function! s:GTDView(where)
 		call add(a:list, {'text':a:text})
 	endfunction
 	
-	let headline = trim(system('figlet '.shellescape(where_msg)))
+	let headline = system('figlet -w 100 '.shellescape(where_msg))
 	let headline = split(headline, '\n')
 	for i in headline
 		call QfAdd(list, i)
 	endfor
-
+	
+	" grep all tasks with status `todo`
+	let pattern = '\- \[ \]'
+	let qf      = s:Grep(pattern, files)
 
 	" grep current actions
 	call QfAdd(list, '')
@@ -2671,8 +2696,6 @@ function! s:GTDView(where)
 	call QfAdd(list, '')
 	
 	echom "Building list of current actions..."
-	let pattern = '\- \[ \]'
-	let qf      = s:Grep(pattern, files)
 	let current = s:FilterByTag('cur', copy(qf))
 	call sort(current, 's:CmpQfByPriority')
 	call extend(list, current)
@@ -2712,7 +2735,30 @@ function! s:GTDView(where)
 	call QfAdd(list, '')
 	
 	echom "Building list of backlog..."
-	let backlog = s:FilterByBacklog(copy(qf))
+	
+	" FASTER: if `a:where` is `root` or `g:vimdoit_projectsdir` 
+	" we don't need to filter anything and can simply list all tasks in `todo/`
+	if a:where ==# 'root'
+				\ || (a:where ==# 'area' && getcwd() ==# g:vimdoit_projectsdir)
+		" the fast way:
+
+		" use backlog preprocessor
+		let s:grep['preprocessor'] = '--pre '.g:vimdoit_plugindir.'/scripts/pre-backlog.sh'
+		" save cwd
+		let cwd_save = getcwd()
+		execute 'cd '.g:vimdoit_projectsdir.'/todo'
+		" grep
+		let backlog = s:Grep(pattern, files)
+		" restore cwd
+		execute 'cd '.cwd_save
+	else
+		" the slower way (computing intersection):
+
+		" filter by backlog
+		let backlog = s:FilterByBacklog(copy(qf))
+	endif
+	
+	" let backlog = s:FilterByBacklog(copy(qf))
 	call sort(backlog, 's:CmpQfByPriority')
 	call extend(list, backlog)
 	echom "...done"
@@ -2863,69 +2909,32 @@ function! s:FilterByBacklog(...)
 		echoerr "Invalid number of arguments in s:FilterByBacklog()!"
 	endif	
 	
-	function! ByStatus(idx, val)
-		let status = s:ExtractStatus(a:val['text'])
-		if status !=# 'todo'
-			return v:false
-		else
-			return v:true
-		endif
-	endfunction
+	" filter all tasks which are not also in projects in ./todo
+	call s:SaveLocation()
+	call vimdoit_utility#SaveCfStack()
+	execute 'cd '.g:vimdoit_projectsdir.'/todo'
 	
-	" filter all tasks which are not in projects in ./todo
+	let s:grep['preprocessor'] = '--pre '.g:vimdoit_plugindir.'/scripts/pre-backlog.sh'
+	let backlog = s:Grep('\- \[ \]', '')
+	
+	call s:RestoreLocation()
+	call vimdoit_utility#RestoreCfStack()
+	
 	let fil_1 = []
 	for i in qf
-		let full = expand("#".i['bufnr'].":p")
-		let full_relative = substitute(full, '\v^'.g:vimdoit_projectsdir.'/', '', '')
-		if full_relative =~# '\v^todo'
-			call add(fil_1, i)
-		endif
+		let id1 = s:ExtractId(i['text'])
+		for j in backlog
+			let id2 = s:ExtractId(j['text'])
+			if id1 ==# id2
+				call add(fil_1, j)
+			endif
+		endfor
 	endfor
 
-	" filter tasks with status `done`, `failed`, `cancelled`
-	" this will also filter notes, ...
-	call filter(fil_1, function('ByStatus'))
-
-	let fil_2     = []
-	let today     = strftime("%Y-%m-%d")
-	let thisweek  = strftime('%V')
-	let thismonth = strftime('%m')
-	let thisyear  = strftime('%Y')
-	
-	for j in fil_1
-		let filename     = expand("#".j['bufnr'].":t:r")
-		let filename_rel = substitute(expand("#".j['bufnr'].":p"), '\v'.g:vimdoit_projectsdir.'/todo/', '', '')
-		let yearnum  = substitute(filename_rel, '\v^\d{4}\zs.*\ze', '', '')
-		
-		" check if the task is in a weekly-project and filter the current week
-		if filename =~# '\vkw\-\d{2}'
-			let weeknum = substitute(filename, '\vkw\-', '', '')
-			if weeknum <# thisweek && yearnum <=# thisyear
-				call add(fil_2, j)
-			endif
-		endif
-		
-		" check if the task is in a monthly-project and filter the current month
-		if filename =~# '\v\d{2}\-(januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember)'
-			let monthnum = substitute(filename, '\v^\d{2}\zs.*\ze', '', '')
-			if monthnum <# thismonth && yearnum <=# thisyear
-				call add(fil_2, j)
-			endif
-		endif
-		
-		" check if the task is in a daily-project and filter the current day
-		if filename =~# '\v'.s:pat_date && filename <# today
-			call add(fil_2, j)
-		endif
-	endfor
-
-	" sort by backlog date
-	call sort(fil_2, 's:CmpQfByBacklog')
-	
 	if a:0 == 0
-		call setqflist(fil_2)
+		call setqflist(fil_1)
 	else
-		return fil_2
+		return fil_1
 	endif
 endfunction
 
