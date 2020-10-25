@@ -312,6 +312,7 @@ function! s:AutoCreateMonths(start, end)
 endfunction
 
 function! s:SymlinkProjects()
+	
 	" heute
 	let name   = 'heute'
 	let date   = strftime('%Y-%m-%d')
@@ -462,7 +463,6 @@ function! s:AutocreateProjects()
 	call s:AutoCreateDays(start, end)
 	call s:AutoCreateWeeks(start, end)
 	call s:AutoCreateMonths(start, end)
-	call s:SymlinkProjects()
 endfunction
 
 function! s:PrepareLayout()
@@ -481,6 +481,7 @@ function! s:Init()
 	echom "Initializing..."
 	call s:InitBufferlist()
 	call s:AutocreateProjects()
+	call s:SymlinkProjects()
 	call s:PrepareLayout()
 	echom "Initializing finished, vimdoit ready"
 endfunction
