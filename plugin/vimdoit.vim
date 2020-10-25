@@ -2143,7 +2143,7 @@ function! s:GrepThings(where, what)
 
 		if char ==# 'm' || char ==# 'i'
 			call s:ToggleGrepOptions(char)
-			mode | call s:GrepProjects(a:where)	
+			mode | call s:GrepThings(a:where, a:what)	
 			" restore cwd
 			execute 'cd '.cwd_save
 			return
@@ -4480,6 +4480,9 @@ function! s:LoadMappings()
 		nnoremap <leader>o.	:<c-u>call <SID>GTDView('area')<cr>
 		nnoremap <leader>or	:<c-u>call <SID>GTDView('root')<cr>
 		nnoremap <leader>oq	:<c-u>call <SID>GTDView('quickfix')<cr>
+
+		" insert task below the current line
+		nnoremap t	o- [ ] 
 		
 		echom "Mappings loaded"
 		let b:vimdoit_did_load_mappings = 1
