@@ -2405,6 +2405,69 @@ endfunction
 "																		Views																"
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
+function! s:NicenListByDate(list, week, month)
+	
+	let list = s:FilterByHasDate(a:list)
+	call sort(list, 's:CmpQfByDate')
+	let idx        = 0
+	let day_prev   = ''
+	let week_prev  = ''
+	let month_prev = ''
+	let year_prev  = ''
+	
+	while idx < len(list)
+
+		let date = s:ExtractDate(list[idx]['text'])
+		" debug, nothing should be echoed here
+		if empty(date) == v:true
+			echom list[idx].text
+		endif
+		
+		let day = trim(system('date --date='.date['date'].' +%A'))
+		let week = trim(system('date --date='.date['date'].' +%V'))
+		let month = trim(system('date --date='.date['date'].' "+%B"'))
+		let year = trim(system('date --date='.date['date'].' +%Y'))
+
+		let inc = 1
+		let insert = []
+
+		if day_prev !=# day
+			call add(insert, day.', '.date['date'].':')
+			call add(insert, '')
+		endif
+
+		if a:week == v:true && week_prev !=# week
+			call add(insert, '')
+			call add(insert, '--------------------------------------')
+			call add(insert, '-							Woche '.week.'	 					  -')
+			call add(insert, '--------------------------------------')
+			call add(insert, '')
+		endif
+		
+		if a:month == v:true && month_prev !=# month
+			call add(insert, '')
+			call add(insert, '======================================')
+			call add(insert, '=						'.month.' '.year.'						=')
+			call add(insert, '======================================')
+			call add(insert, '')
+		endif
+		
+		for i in insert
+			call insert(list, {'text' : i}, idx)
+			let inc = inc + 1
+		endfor
+
+		let idx        = idx + inc
+		let day_prev   = day
+		let week_prev  = week
+		let month_prev = month
+		let year_prev  = year
+	endwhile
+
+	return list
+
+endfunction
+
 function! s:NicenQfByDate()
 
 	call s:FilterByHasDate()
@@ -2418,7 +2481,8 @@ function! s:NicenQfByDate()
 	
 	while idx < len(qf)
 
-		let date = s:ExtractDate(qf[idx].text)
+		let date = s:ExtractDate(qf[idx]['text'])
+		" debug, nothing should be echoed here
 		if empty(date) == v:true
 			echom qf[idx].text
 		endif
@@ -2519,15 +2583,23 @@ function! s:SetQfSyntax()
 	" :set conceallevel=2 concealcursor=nc
 	" syntax match qfFileName "\v^.{-}\|\d+\scol\s\d+\|" conceal
 	" syntax match Bars "\v^\|\|" conceal
-
-	syntax match CalendarDateAndTime "\v\w*, \d{4}-\d{2}-\d{2}:"
+	
+	syntax match QfHeadingText "\v[^-=(\|\|)]*" contained
+	highlight link QfHeadingText Operator
+	syntax match CalendarDateAndTime "\v\w*, \d{4}-\d{2}-\d{2}:" contained
 	highlight link CalendarDateAndTime Operator
+	syntax region QfHeading start="\v^\|\| [^-=]" end="$" contains=QfHeadingText,CalendarDateAndTime
 
-	syntax match CalendarText "\v(\s{3,}\w+\s\d+\s{3,})" contained
-	highlight link CalendarText Operator
-	syntax match CalendarWeek "\v(-{38}|\={38})"
-	syntax match CalendarWeek "\v\s(-|\=)(\s{3,}\w+\s\d+\s{3,})(-|\=)$" contains=CalendarText
-	highlight link CalendarWeek Identifier
+	syntax match QFHeadlineText "\a*\d*" contained
+	syntax match QfHeadlineTextLine "\v[-=].*[-=]$" contains=QfHeadlineText
+	highlight link QFHeadlineText Operator
+	highlight link QfHeadlineTextLine Identifier
+	
+	syntax match QFHeadlineDelimiter "\v[-=]{5,}"
+	highlight link QFHeadlineDelimiter Identifier
+
+	syntax match QFLine "\v^\|\| " contains=QfHeadlineTextLine,QfHeading
+	highlight link QFLine None
 	
 	" Section Headings
 	syntax match SectionHeadlineDelimiter "\v\<" contained conceal
@@ -2677,9 +2749,18 @@ function! s:GTDView(where)
 	function! QfAdd(list, text)
 		call add(a:list, {'text':a:text})
 	endfunction
+
+	function! Figlify(text, font, list)
+		let ret = system('figlet -w 100 -f '.shellescape(a:font).' '.shellescape(a:text))
+		let ret = split(ret, '\n')
+		for i in ret
+			call QfAdd(a:list, i)
+		endfor
+	endfunction
 	
-	let headline = system('figlet -w 100 '.shellescape(where_msg))
+	let headline = system('figlet -w 200 -f banner '.shellescape(where_msg))
 	let headline = split(headline, '\n')
+	call QfAdd(list, "")
 	for i in headline
 		call QfAdd(list, i)
 	endfor
@@ -2689,10 +2770,12 @@ function! s:GTDView(where)
 	let qf      = s:Grep(pattern, files)
 
 	" grep current actions
+	let current_actions = system('figlet -f small "Current Actions"')
 	call QfAdd(list, '')
-	call QfAdd(list, '=====================================')
-	call QfAdd(list, '=			    	Current Actions	 		   =')
-	call QfAdd(list, '=====================================')
+	call QfAdd(list, '======================================')
+	" call QfAdd(list, current_actions)
+	call QfAdd(list, '=					Current Actions						=')
+	call QfAdd(list, '======================================')
 	call QfAdd(list, '')
 	
 	echom "Building list of current actions..."
@@ -2742,6 +2825,8 @@ function! s:GTDView(where)
 				\ || (a:where ==# 'area' && getcwd() ==# g:vimdoit_projectsdir)
 		" the fast way:
 
+		" save preprocessor
+		let pre_save = s:grep['preprocessor']
 		" use backlog preprocessor
 		let s:grep['preprocessor'] = '--pre '.g:vimdoit_plugindir.'/scripts/pre-backlog.sh'
 		" save cwd
@@ -2751,6 +2836,8 @@ function! s:GTDView(where)
 		let backlog = s:Grep(pattern, files)
 		" restore cwd
 		execute 'cd '.cwd_save
+		" restore preprocessor
+		let s:grep['preprocessor'] = pre_save
 	else
 		" the slower way (computing intersection):
 
@@ -2758,7 +2845,6 @@ function! s:GTDView(where)
 		let backlog = s:FilterByBacklog(copy(qf))
 	endif
 	
-	" let backlog = s:FilterByBacklog(copy(qf))
 	call sort(backlog, 's:CmpQfByPriority')
 	call extend(list, backlog)
 	echom "...done"
@@ -2798,6 +2884,9 @@ function! s:GTDView(where)
 	" sort by date
 	call sort(updates, 's:CmpQfByDate')
 	let updates = s:FilterByDate('NextTwoWeeks', updates)
+	" echom updates
+	let updates = s:NicenListByDate(updates, v:false, v:false)
+	" echom updates
 	call extend(list, updates)
 	echom "...done"
 	
@@ -2850,8 +2939,15 @@ function! s:FilterByStatus(status, ...)
 	endif	
 
 	let s:filter['status'] = a:status
+	
 	function! ByStatus(idx, val)
+		
 		let status = s:ExtractStatus(a:val['text'])
+		" don't remove things which don't have a status (notes)
+		if status == -1
+			return v:true
+		endif
+		
 		if status ==# s:filter['status']
 			return s:filter['invert'] == v:true ? v:false : v:true
 		else
@@ -2898,6 +2994,64 @@ function! s:FilterByBlocking()
 	call setqflist(l:qf)
 endfunction
 
+function! s:FilterByScheduled(...)
+	
+	" checking parameters
+	if a:0 == 0
+		let qf = getqflist()
+	elseif a:0 == 1
+		let qf = a:1
+	else
+		echoerr "Invalid number of arguments in s:FilterByScheduled()!"
+	endif	
+	
+	call s:SaveLocation()
+	call vimdoit_utility#SaveCfStack()
+	execute 'cd '.g:vimdoit_projectsdir.'/todo'
+	let s:grep['preprocessor'] = ''
+	let scheduled = s:Grep('\- \[.\]', '')
+	call s:RestoreLocation()
+	call vimdoit_utility#RestoreCfStack()
+	
+	let fil_1 = []
+	for i in qf
+		let id1 = s:ExtractId(i['text'])
+		for j in scheduled
+			let id2 = s:ExtractId(j['text'])
+			if id1 ==# id2
+				call add(fil_1, j)
+			endif
+		endfor
+	endfor
+
+	if s:filter['invert'] == v:true
+
+		let list = []
+		for i in qf
+			let id1 = s:ExtractId(i['text'])
+			let found = v:false
+			for j in fil_1
+				let id2 = s:ExtractId(j['text'])
+				if id1 ==# id2
+					let found = v:true
+				endif
+			endfor
+			if found == v:false
+				call add(list, i)
+			endif
+		endfor
+
+		let fil_1 = list
+	endif
+
+	if a:0 == 0
+		call setqflist(fil_1)
+	else
+		return fil_1
+	endif
+
+endfunction
+
 function! s:FilterByBacklog(...)
 	
 	" checking parameters
@@ -2909,16 +3063,20 @@ function! s:FilterByBacklog(...)
 		echoerr "Invalid number of arguments in s:FilterByBacklog()!"
 	endif	
 	
-	" filter all tasks which are not also in projects in ./todo
 	call s:SaveLocation()
 	call vimdoit_utility#SaveCfStack()
 	execute 'cd '.g:vimdoit_projectsdir.'/todo'
+	" save preprocessor
+	let pre_save = s:grep['preprocessor']
 	
 	let s:grep['preprocessor'] = '--pre '.g:vimdoit_plugindir.'/scripts/pre-backlog.sh'
+	
 	let backlog = s:Grep('\- \[ \]', '')
 	
 	call s:RestoreLocation()
 	call vimdoit_utility#RestoreCfStack()
+	" restore preprocessor
+	let s:grep['preprocessor'] = pre_save
 	
 	let fil_1 = []
 	for i in qf
@@ -2930,6 +3088,26 @@ function! s:FilterByBacklog(...)
 			endif
 		endfor
 	endfor
+
+	if s:filter['invert'] == v:true
+
+		let list = []
+		for i in qf
+			let id1 = s:ExtractId(i['text'])
+			let found = v:false
+			for j in fil_1
+				let id2 = s:ExtractId(j['text'])
+				if id1 ==# id2
+					let found = v:true
+				endif
+			endfor
+			if found == v:false
+				call add(list, i)
+			endif
+		endfor
+
+		let fil_1 = list
+	endif
 
 	if a:0 == 0
 		call setqflist(fil_1)
@@ -3054,7 +3232,17 @@ function! s:FilByHasRepetition(idx, val)
 	return empty(rep) == v:true ? v:false : v:true
 endfunction
 
-function! s:FilterByHasDate()
+function! s:FilterByHasDate(...)
+	
+	" checking parameters
+	if a:0 == 0
+		let qf = getqflist()
+	elseif a:0 == 1
+		let qf = a:1
+	else
+		echoerr "Invalid number of arguments in s:FilterByBacklog()!"
+	endif	
+
 	function! ByDate(idx, val)
 		let date = s:ExtractDate(a:val['text'])
 		if empty(date) == v:false
@@ -3064,9 +3252,13 @@ function! s:FilterByHasDate()
 		endif
 	endfunction
 	
-	let qf = getqflist()
 	call filter(qf, function('ByDate'))
-	call setqflist(l:qf)
+	
+	if a:0 == 0
+		call setqflist(qf)
+	else
+		return qf
+	endif
 endfunction
 
 function! s:FilterByRepetition()
@@ -3228,7 +3420,7 @@ function! s:FilterPrompt()
 		return
 	endif
 		
-	echom 'Filter quickfix by:    [t]odo    [d]one    [c]ancelled    [f]ailed    [w]aiting    [b]locking    b[a]cklog    [u]nique    [n]ext    cu[r]rent    ta[s]k    n[o]te    dat[e]    [R]epetition    toda[y]    t[h]is week    ne[x]t week    this [m]onth    [p]ast    upcomin[g]    '.s:FilterModeMsg()
+	echom 'Filter quickfix by:    [t]odo    [d]one    [c]ancelled    [f]ailed    [w]aiting    [b]locking    b[a]cklog    schedu[l]ed    [u]nique    [n]ext    cu[r]rent    ta[s]k    n[o]te    dat[e]    [R]epetition    toda[y]    t[h]is week    ne[x]t week    this [m]onth    [p]ast    upcomin[g]    '.s:FilterModeMsg()
 
 	try 
 		let char = nr2char(getchar())
@@ -3243,33 +3435,39 @@ function! s:FilterPrompt()
 
 	mode
 
+	let not = s:filter['invert'] == v:true ? '! ' : ''
+
 	if char ==# 't'
-		echom 'Filtering by "todo"...'
+		echom 'Filtering by "'.not.'todo"...'
 		call s:FilterByStatus('todo')
 		echom '...done'
 	elseif char ==# 'd'
-		echom 'Filtering by "done"...'
+		echom 'Filtering by "'.not.'done"...'
 		call s:FilterByStatus('done')
 		echom '...done'
 	elseif char ==# 'c'
-		echom 'Filtering by "cancelled"...'
+		echom 'Filtering by "'.not.'cancelled"...'
 		call s:FilterByStatus('cancelled')
 		echom '...done'
 	elseif char ==# 'f'
-		echom 'Filtering by "failed"...'
+		echom 'Filtering by "'.not.'failed"...'
 		call s:FilterByStatus('failed')
 		echom '...done'
 	elseif char ==# 'w'
-		echom 'Filtering by "waiting"...'
+		echom 'Filtering by "'.not.'waiting"...'
 		call s:FilterByWaiting()
 		echom '...done'
 	elseif char ==# 'b'
-		echom 'Filtering by "blocking"...'
+		echom 'Filtering by "'.not.'blocking"...'
 		call s:FilterByBlocking()
 		echom '...done'
 	elseif char ==# 'a'
-		echom 'Filtering by "backlog"...'
+		echom 'Filtering by "'.not.'backlog"...'
 		call s:FilterByBacklog()
+		echom '...done'
+	elseif char ==# 'l'
+		echom 'Filtering by "'.not.'scheduled"...'
+		call s:FilterByScheduled()
 		echom '...done'
 	elseif char ==# 'u'
 		echom 'Removing duplicates...'
@@ -3280,51 +3478,51 @@ function! s:FilterPrompt()
 		call s:FilterByUnique()
 		echom '...done'
 	elseif char ==# 'n'
-		echom "Filtering by next..."
+		echom 'Filtering by "'.not.'next"...'
 		call s:FilterByTag('next-?(\d+)?')
 		echom '...done'
 	elseif char ==# 'r'
-		echom "Filtering by current..."
+		echom 'Filtering by "'.not.'current"...'
 		call s:FilterByTag('cur')
 		echom '...done'
 	elseif char ==# 's'
-		echom "Filtering by tasks..."
+		echom 'Filtering by "'.not.'tasks"...'
 		call s:FilterByTask()
 		echom '...done'
 	elseif char ==# 'o'
-		echom "Filtering by notes..."
+		echom 'Filtering by "'.not.'notes"...'
 		call s:FilterByNote()
 		echom '...done'
 	elseif char ==# 'e'
-		echom 'Filtering by "has date"...'
+		echom 'Filtering by "'.not.'has date"...'
 		call s:FilterByHasDate()
 		echom '...done'
 	elseif char ==# 'R'
-		echom 'Filtering by "has repetition"...'
+		echom 'Filtering by "'.not.'has repetition"...'
 		call s:FilterByRepetition()
 		echom '...done'
 	elseif char ==# 'y'
-		echom 'Filtering by "today"...'
+		echom 'Filtering by "'.not.'today"...'
 		call s:FilterByDate('Today')
 		echom '...done'
 	elseif char ==# 'h'
-		echom 'Filtering by "this week"...'
+		echom 'Filtering by "'.not.'this week"...'
 		call s:FilterByDate('ThisWeek')
 		echom '...done'
 	elseif char ==# 'x'
-		echom 'Filtering by "next week"...'
+		echom 'Filtering by "'.not.'next week"...'
 		call s:FilterByDate('NextWeek')
 		echom '...done'
 	elseif char ==# 'm'
-		echom 'Filtering by "this month"...'
+		echom 'Filtering by "'.not.'this month"...'
 		call s:FilterByDate('ThisMonth')
 		echom '...done'
 	elseif char ==# 'p'
-		echom 'Filtering by "past"...'
+		echom 'Filtering by "'.not.'past"...'
 		call s:FilterByDate('Past')
 		echom '...done'
 	elseif char ==# 'g'
-		echom 'Filtering by "upcoming"...'
+		echom 'Filtering by "'.not.'upcoming"...'
 		call s:FilterByDate('Upcoming')
 		echom '...done'
 	endif
