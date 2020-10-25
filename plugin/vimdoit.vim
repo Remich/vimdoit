@@ -109,9 +109,10 @@ let s:location_stack = []
 function! s:SaveLocation()
 	let loc = {
 				\'cursor' : getcurpos(),
-				\'buffer' : bufname(),
+				\'buffer' : bufnr(),
 				\'cwd'		: getcwd(),
 				\'winnr'  : winnr(),
+				\'qf'			: exists('w:quickfix_title') ? v:true : v:false
 				\}
 	call add(s:location_stack, loc)
 endfunction
@@ -120,7 +121,11 @@ function! s:RestoreLocation()
 	let loc = s:location_stack[-1]
 	execute "cd ".loc['cwd']
 	call win_gotoid(loc['winnr'])
-	execute "buffer ".loc['buffer']
+	if loc['qf'] == v:true
+		copen
+	else
+		execute "buffer ".loc['buffer']
+	endif
 	call setpos('.', loc['cursor'])
 	normal! zz
 	call remove(s:location_stack, -1)
@@ -173,6 +178,8 @@ function! s:InitBufferlist()
 	echom "Initializing buffer list"
 	call s:SaveLocation()
 	execute 'argadd '.g:vimdoit_projectsdir.'/**/*.vdo '.g:vimdoit_projectsdir.'/**/.*.vdo'
+	" do something to load all buffers
+	silent argdo call getline('1')
 	call s:RestoreLocation()
 endfunction
 
@@ -1455,6 +1462,22 @@ function! s:ExtractPriority(line)
 	return len(priority)
 endfunction
 
+command! Prio :echom s:GetProjectPriority(bufnr())
+function! s:GetProjectPriority(bufnr)
+
+	let info = getbufinfo(a:bufnr)[0]
+	" check if buffer is loaded?
+	if info['loaded'] == v:true
+		let line = getbufline(a:bufnr, 1)[0]
+	else
+		silent execute "buffer ".a:bufnr
+		let line = getline(1)
+	endif
+	
+	let pr = s:ExtractPriority(line)
+	return pr == 0 ? 1 : pr
+endfunction
+
 function! s:ExtractFlags(line)
 	let flags = s:ExtractPatternFromString(a:line, s:patterns['flags'])	
 	return flags
@@ -1886,7 +1909,10 @@ endfunction
 
 function! s:CmpQfByPriority(e1, e2)
 	let [t1, t2] = [s:ExtractPriority(a:e1['text']), s:ExtractPriority(a:e2['text'])]
-	return t1 ># t2 ? -1 : t1 ==# t2 ? 0 : 1
+	let [p1, p2] = [s:GetProjectPriority(a:e1['bufnr']), s:GetProjectPriority(a:e2['bufnr'])]
+	let pr1 = t1 * p1
+	let pr2 = t2 * p2
+	return pr1 > pr2 ? -1 : pr1 == pr2 ? 0 : 1
 endfunction
 
 function! s:CmpQfByProject(e1, e2)
