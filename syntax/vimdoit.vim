@@ -71,8 +71,8 @@ highlight link FlagSprint Constant
 syntax match FlagBlock "\v\$<block>" contained
 highlight link FlagBlock Orange
 
-" Flag Waiting For Block ('~a42a')
-syntax match FlagWaiting "\v\~\x{8}" contained
+" Flag Waiting For Block ('~a42aa24a')
+syntax match FlagWaiting "\v\~\x{8}(\|\x{4})?(\s+)?" contained
 highlight link FlagWaiting String
 
 " Flag ID ('0x8c3d19d5')
