@@ -1,0 +1,255 @@
+<vimdoit> #active
+Progress: 74.57%
+
+														The new vimdoit Project
+														
+==============================================================================
+<Inbox>
+
+- [ ] Grep TODOs
+- [ ] IMPLEMENT: yanking of a task wont copy the tags `#next` and `#cur`
+- [ ] IMPLEMENT: propagating changes wont overwrite the tags `#next` and `#cur`
+
+------------------------------------------------------------------------------
+<OLD>
+
+
+- [ ] IMPLEMENT: Mapping for faster project creation -- 0x6beb77d9
+- [ ] IMPLEMENT: Grep Tasks by "backlog" -- 0x012c14d6
+	- USE: Projects for each day in `./todo` -- 0x00794b8c
+	- USE: Projects for each week -- 0xa8e330cd
+	- "backlog" are als tasks not finished and in files not today -- 0xda821d32
+- [x] FIX: dates of auto-generated tasks are not being updated, when changing a repetition -- 0x14ddf7e0
+- [ ] FIX: deletion of upcoming auto-generated tasks not working, when auto-generated task is already in `./todo` -- 0x7b7b01a4
+- [ ] FIX: IDs sometimes being generated -- 0xcebfc795
+- [ ] FIX: Wrong cursor position after writing -- 0x501a4a01
+- [ ] GREP: tasks with no id -- 0x90d0248d
+- [ ] IMPLEMENT: Auto-generated repetitions should inherit all properties of the parent, and keep their own -- 0xe3385e88
+- [ ] MOVE: nicenqf to sorting -- 0xeef620e1
+- [ ] IMPLEMENT: filter by block -- 0x5d65a8fc
+- [ ] IMPLEMENT: filter by waiting -- 0xe5c0d175
+- [ ] IMPLEMENT: grep blocks of waiting task -- 0xa29f540b
+- [ ] IMPLEMENT: grep auto-generated tasks of repetition -- 0xa7d7ab6e
+- [ ] IMPLEMENT: filtering of multiple properties, with `and`, `or`, `not` operator -- 0x07478de6
+- [ ] !!!! FIX: everytime when grepping, we have to make sure that all files are written to disk -- 0xfd7c539c
+	- [x] generating a task/note id -- 0x9a38b259
+	- [-] generating a block id -- 0x2634d479
+		- abandoned the concept of block ids -- 0x76216cc5
+	- [ ] grepping projects -- 0xed70997e
+	- [ ] grepping tasks -- 0xe54bc192
+	- [ ] what else? -- 0xcf0f7415
+		- MAYBE: updating references, or do we write first? -- 0x7edc2c6e
+- [x] !! FIX: when removing a task in file a) and changing another task in file b) without saving task a) first, and file a) has that changed task as a reference, the wrong task will be updated as an external reference -- 0x320c7056
+	- [x] SOLUTION: -- 0x0f6c77bb
+		- open all files at startup with `args` -- 0x6faae81f
+		- use `bufdo` and `global` -- 0xfd46e006
+- [x] !!!!!! FIX: Eckige Klammern in Task Names don't work with repetitions -- 0xcfef146f
+- [ ] IMPLEMENT: PREPEND: all global variables with `vimdoit` -- 0x55e5f38a
+- [ ] FIX: infinite loop when jumping to today in qf list -- 0x085eb5ce
+- [ ] IMPLEMENT: mapping to open datefile of current project -- 0xad50f336
+- [x] ! FIX: grepping for IDs must be global from the root directory -- 0x3b9181df
+- [x] ! FIX: grepping for BlockIDs must be global from the root directory -- 0xa98d5ffe
+- [ ] FIX: changing `validation.vdo` does not change the datefile properly -- 0x900ae6ce
+- [x] FIX: qf unique appointments not working -- 0xdcb26fbb
+- [x] FIX: at bottom quickfix stack, when saving files -- 0xec49d3f3
+- [ ] vimdoit: vimneuro: actual deletion of quickfix lists when restoring cfstack -- 0x12121212
+- [x] IMPLEMENT: task of type "cancelled". is grey does not get counted -- 0x1e944485
+	- [x] Syntax -- 0x60cdc889
+- [x] REMOVE: hardcoded paths -- 0x8e2ea422
+- [x] !! CHECK: if `dateseq` is installed -- 0xad8bbdb1
+- [x] !! CHECK: if `dateadd` is installed -- 0x4e3ba42d
+- [x] !! CHECK: if `dround` is installed -- 0xd02be2c6
+- [x] FIX: ampersands in task/note name -- 0x59249bc0
+- [x] FIX: adding of IDs adds two `--` -- 0x2ce0ed21
+- [ ] !! TEST: `dround` at newyear -- 0xd39bff57
+- [x] PARSER: only allow a task to have a repetition or single date -- 0xc31c1f05
+- [x] !!!!! CHECK: usage of `uniq` everywhere only removes second and suceeding copies -- 0x10140efc
+- [x] !! FIX: Mappings too slow -- 0x2024a679
+- [x] CHECK: for premature exiting when previously saving the cfstack -- 0x42634696
+		
+==============================================================================
+<Repetitions>
+
+- [ ] IMPLEMENT: only time frames: `{15:30–17:30}` -- 0x47df057e
+- [ ] IMPLEMENT: start date with time; end date with time: `{2020-10-17 15:30|d:1|2020-10-24 18:30}` -- 0x80297ccc
+- [x] FIX: Deletion of unused dates in datefile not working. -- 0x8601022e
+- [ ] IMPLEMENT: when moving repetitions to different projects, the auto-generated dates in the datefile should be moved accordingly -- 0xf3b12895
+- [ ] MAYBE??: throw error, when attempting to change an auto-generated date -- 0xcb95ecac
+- [x] ! FIX: Repetition and Ranges too slow -- 0x8e4d545a
+- [x] REMOVE: old interpolation code -- 0xeeae1a08
+- [x] IMPLEMENT: datefile.vdo -- 0xbece6317
+	- [x] FIX: When changing repetition (`|w:7` to `|w:1`) the old entries in the datefile are being upated as external references -- 0x4c1a406f
+	- [x] CHECK_IMPLEMENT: if we change the text of the original repetition, will the entries in the datefile also be changed? -- 0xe94e9999
+- [x] VALIDATE: Start Date -- 0xc30f1cb3
+	- [x] VALIDATE: End Date -- 0xdb3a53a7
+	- [x] VALIDATE: Operator -- 0xad683e8f
+	- [x] VALIDATE: Operand -- 0x3fd84f74
+	- [x] ! VALIDATE: only one range or date in task/note allowed -- 0xfaa9e09d
+	- [x] CHECK: if dateIDs work with external referencing -- 0xbec6b545
+	- [x] PROBLEM_THINK: we need a datefile in each area, otherwise when grepping for appointments tasks of other areas show up in the results -- 0x4d645254
+	- [x] PROBLEM_THINK: filter results of datefile when grepping for appointments in current file, we don't want tasks of other files to show up in the results -- 0x0ff15ada
+	- [x] IMPLEMENT: support for time -- 0x30bbb4c9
+	- [x] CHECK: does it work with notes? -- 0x78f27f08
+	- [x] IMPLEMENT: when grepping for appointments or the like always grep additionally in datefile.vdo -- 0xb7eecb5f
+	- [x] FIX: grepping for appointments should not grep ranges/repetitions -- 0x03a269b8
+	- [-] IMPLEMENT: grepping for ranges -- 0xf35914f5
+		- instead of ranges, we only use repetitions -- 0x172647aa
+	- [x] IMPLEMENT: grepping for repetitions -- 0x49d6094f
+	- [x] REMOVE: code for ranges -- 0x1eba7e6b
+	- [x] IMPLEMENT: skip parsing of datefile.vdo -- 0x5f7c457d
+	- [x] IMPLEMENT: cleanup of datefile.vdo after each write -- 0x30d6dc18
+		- [x] remove unused dates, if task has been deleted -- 0x0a811a17
+		- [x] re-calculate and insert ranges/repetitions, so we are always 3 months into the future -- 0x19f1a372
+			- use command `:VdoUpdateDates` -- 0x87509c84
+		- [x] MAYBE: sorting -- 0xea680050
+- [x] CHECK: does grepping for malformed dates still work? -- 0x2c809092
+
+
+==============================================================================
+<Syntax>
+
+- [x] ADD: TaskFailed Levels -- 0xa6b03bd5
+- [x] ADD: TaskCancelled Levels -- 0xb45f960b
+- [ ] use `@´ for timeframe -- 0xc7d05479
+- [x] !! CHECK: when parsing, if task/note has a date, check if the date has the correct format -- 0xaecc99a4
+
+==============================================================================
+<External Referencing>
+
+- [x] !!! CHECK: when grepping for duplicate IDs: do we actually grep in all projects (cwd)? -- 0x7ae49f3a
+- [x] FIX: grepping from root directory, when updating external references -- 0x360875f4
+- [x] Save/Restore Quickfix Lists -- 0xbd7ea380
+	- [x] with Cursor position -- 0x100a69de
+
+==============================================================================
+<Mappings>
+
+- [x] IMPLEMENT: Mappings for often used directories -- 0x8f233558
+	- see: `init.vim` -- 0x3eafea36
+- [ ] Modify task/note of line/selection as -- 0x2dcae3b8
+	- [x] Done -- 0xec8b8ce5
+	- [x] Todo -- 0x664172f0
+	- [x] Failed -- 0xc25207fb
+	- [x] Cancelled -- 0x0b37914d
+	- [x] Block -- 0xe196f525
+	- [x] Waiting -- 0x1d9db16e
+	- [x] Task -- 0x3003a822
+	- [x] Note -- 0x4d6d7dfa
+	- [ ] Action -- 0xf2c51232
+	- [ ] Priority -- 0x19e93c66
+	- [x] rm ID -- 0xdc98a66d
+	
+
+==============================================================================
+<Blocks>
+
+- [x] IMPLEMENT: auto-generate block ID -- 0xefb1125d
+
+==============================================================================
+<Grepping>
+
+- [ ] Print Message what exactly is being grepped -- 0x93ebd8de
+	- possible Nvim Bug, setting the title while adding new qflist? -- 0x800bbdd8
+		- `setqflist(l:qf, 'r', {'title' :title}` fucks up sorting and everything -- 0xd1637648
+
+- [x] Grepping -- 0xadbe704c
+- [x] Sorting -- 0xc4859237
+- [x] Filtering -- 0x3369a26d
+
+------------------------------------------------------------------------------
+<Projects>
+
+- [x] CHECK: if we set the correct `grepprg` everywhere -- 0xbf8103a2
+- [x] SELECTPROMPT: Grep Projects -- 0xa0324446
+- [x] all -- 0x49e645e2
+- [x] by active -- 0x89885e0d
+- [x] by focus -- 0xac3e1f24
+- [x] Not cancelled and not completed -- 0xadce1f4b
+- [x] by completed -- 0x3980afd0
+- [x] by cancelled -- 0x29bc17d5
+- [x] not tagged -- 0xffe5efff
+- [x] MAYBE: by archived -- 0x4baeb3f4
+
+------------------------------------------------------------------------------
+<Tasks>
+
+- [x] CHECK: if we set the correct `grepprg` everywhere -- 0x6a4a04cc
+- [x] SELECTPROMPT: Grep Task -- 0xf0bc05e8
+- [x] todo -- 0x0a6fb81f
+- [x] done -- 0x5dedcf37
+- [x] failed -- 0xacf4b40f
+- [x] cancelled -- 0x81a6c73a
+- [x] waiting -- 0x3b045384
+- [x] block -- 0x34743275
+- [x] next -- 0x812bfe01
+- [x] current -- 0x81e7e68f
+- [x] appointment -- 0xa748aaf7
+	- [x] implement -- 0x0dcb6fac
+	- [x] FIX: don't grep projects start and end dates -- 0x15f1f990
+	- [x] date ranges? -- 0xd5c2a5d8
+		- [x] basic implementation -- 0x6b737fb2
+	- [x] repetition -- 0x5b722f50
+		- [x] basic implementation -- 0xf4746adf
+		- [x] when interpolating grep if the exact interpolated date already exists somewhere with the same task name, then use this instead -- 0xc124f6d3
+		- [x] stop date -- 0x9f67666b
+- [x] repetition -- 0x878f2cf0
+- [x] !! invalid appointment -- 0xdeb24d3b
+	- use multiple greps -- 0x4d6b8cca
+- [x] autosort appointment by date -- 0x15f04d28
+- [x] scheduled -- 0x2afd2fa1
+- [x] MAYBE: exclude tasks of projects with status "complete, cancelled, archived" -- 0xc15b6144
+
+------------------------------------------------------------------------------
+	<Sort Quickfix List by>
+
+- [x] CHECK: if we set the correct `grepprg` everywhere -- 0x73ca5ce3
+- [x] SELECTPROMPT: for sorting criteria -- 0x2d09d1be
+- [x] foobar -- 0x5e17bba4
+	- [x] by priority -- 0x542ecf19
+	- [x] by name -- 0x8fca19ec
+	- [x] REMOVE: by name -- 0xc588ce45
+		- NOTE: half-assed implementation; maybe only sort by filename?; no real use-case -- 0xa6abbee1
+	- [x] by filename -- 0x58c6e7dd
+	- [x] by date -- 0xde08068d
+	- [x] by start date (only projects) -- 0xadc083ff
+	- [x] by completion date (only projects) -- 0x7cff7443
+	- [x] by due date (only projects) -- 0x74fc17d5
+
+------------------------------------------------------------------------------
+<Filter Quickfix List by>
+
+- [x] CHECK: if we set the correct `grepprg` everywhere -- 0xa386ef60
+- [x] IMPLEMENT: nicen of quickfix list when of type 'appointment' -- 0xc2ea161f
+- [x] SELECTPROMPT: for filtering criteria -- 0xcaa6f384
+	- [x] by date -- 0x09303fa2
+		- [x] SUBPROMPT: -- 0xeb3c55c7
+			- [x] upcoming -- 0xacb2549e
+			- [x] past -- 0x7356b96c
+			- [x] today -- 0x212bd59d
+			- [x] tomorrow -- 0xbd246fb6
+			- [x] this week -- 0x962cb4d2
+			- [x] next week -- 0x244cf9fb
+			- [x] this month -- 0xeb882438
+	- [x] by status (done, todo, failed, …) -- 0xd23587a6
+	- [x] by 'remove duplicates' -- 0x6146287c
+	- [x] by 'show future' (only appointment) -- 0x221aba8a
+	- [x] by 'show past' (only appointment) -- 0x30f4df30
+
+==============================================================================
+<Status Calculation>
+
+- [ ] FIX: Section with only notes -- 0xd5396afe
+- [ ] Don't count cancelled -- 0xccfb09c7
+
+==============================================================================
+<v2.0>
+
+- [ ] IMPLEMENT: Support for files -- 0x4d2ada37
+- [ ] REFACTOR: Extraction Functions -- 0x877a4e52
+	- [ ] MOVE: to autoloading -- 0x803d0c09
+- [ ] IMPLEMENT: something like hyperlinks -- 0x869a4e0a
+- [ ] A task may reference a (sub-)section, project, area -- 0x4aa37f5f
+	- calculate progress of task accordingly -- 0x05dd7b08
+- [ ] FIX: syntax `- [ ] ( foobar ) asdf` -- 0x4fb43141
+- [ ] !! CHANGE: scheduled regex in grep tasks -- 0xf96a5b1c
+- [ ] IMPLEMENT: when moving repetitions to different projects, the auto-generated dates in the datefile should be moved accordingly -- 0xf3b12895

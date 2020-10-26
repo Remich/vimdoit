@@ -1035,6 +1035,58 @@ function! s:ReplaceLineWithTask(task, lnum)
 	call setline(a:lnum, s:TaskToStr(a:task))
 endfunction
 
+function! s:PropagateChangeToLine(task, lnum)
+	let line = getline(a:lnum)
+	
+	" 1. change the level accordingly
+	let a:task['level'] = s:ExtractFromString(line, {'level':1})['level']
+	
+	" 2. don't propagate tags current and next:
+	let target_tags    = s:ExtractTags(line)
+	let a:task['tags'] = s:MergeTags(a:task['tags'], target_tags)
+	
+	" replace
+	call setline(a:lnum, s:TaskToStr(a:task))
+endfunction
+
+function! s:FilterSpecialTags(list)
+	call filter(a:list, 'v:val !=# "cur"')
+	for t in a:list
+		if t =~# '\vnext((\-)?\d+)?'
+			call filter(a:list, 'v:val !=# "'.t.'"')
+		endif
+	endfor
+endfunction
+
+command! -nargs=0 Test	:call s:MergeTags('asdf', 'fdsa')
+function! s:MergeTags(source, target)
+
+	let target = a:target
+	let source = a:source
+	" let target = [ 'barfoof', 'foobar', 'next', 'cur', 'next-2']
+	" let source = [ 'cur', 'next-2', 'tag_source' ]
+	
+	" remove `cur`, `next`, `next-1` … from the source tags
+	call s:FilterSpecialTags(source)
+
+	" remove everything except `cur`, `next`, `next-1` … from the target tags
+	let target_new = []
+	for t in target
+		if t =~# '\vnext((\-)?\d+)?'
+			call add(target_new, t)
+		endif
+		if t ==# 'cur'
+			call add(target_new, "cur")
+		endif
+	endfor
+	
+	" merge them
+	call extend(target_new , source)
+	call uniq(sort(target_new))
+	return target_new
+
+endfunction
+
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 "																		Drawer													     	"
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -3889,6 +3941,24 @@ function! s:RemoveTaskBlocking(lines)
 	endfor
 endfunction
 
+function! s:RemoveSpecialTags(lines)
+	for lnum in a:lines
+		let line = getline(lnum)
+		echom line
+		
+		" check if line is task or note
+		if s:IsLineNote(line) == v:false && s:IsLineTask(line) == v:false
+			echoerr "No line or task in line ".lnum
+			return
+		endif
+	
+		let task       = s:ExtractLineData(line)
+		call s:FilterSpecialTags(task['tags'])
+		call s:ReplaceLineWithTask(task, lnum)
+	
+	endfor
+endfunction
+
 function! s:RemoveTaskId(lines)
 	for lnum in a:lines
 		let line = getline(lnum)
@@ -3941,7 +4011,7 @@ function! s:RemoveTaskWaiting(lines)
 endfunction
 
 function! s:RemoveTaskPrompt(type)
-	echom 'Remove from Task(s):    d[a]te    ti[m]e    [w]aiting    [b]locking    [i]d'
+	echom 'Remove from Task(s):    d[a]te    ti[m]e    [w]aiting    [b]locking    [i]d    [s]pecial tags'
 	let char = nr2char(getchar())
 	
 	if a:type ==# 'V'
@@ -3962,6 +4032,8 @@ function! s:RemoveTaskPrompt(type)
 		call s:RemoveTaskBlocking(lines)
 	elseif char ==# 'i'
 		call s:RemoveTaskId(lines)
+	elseif char ==# 's'
+		call s:RemoveSpecialTags(lines)
 	endif
 endfunction
 
@@ -4211,7 +4283,7 @@ function! s:PropagateChanges()
 		let id = escape(task['id'], '|')
 		" updating of references
 		" both base and extended ids
-		execute 'silent! bufdo global/\v<0x'.id.'(\s|$)/call s:ReplaceLineWithTask(task, line("."))'
+		execute 'silent! bufdo global/\v<0x'.id.'(\s|$)/call s:PropagateChangeToLine(task, line("."))'
 	endfor
 	" restore original location
 	call s:RestoreLocation()
