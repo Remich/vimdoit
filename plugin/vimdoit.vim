@@ -2547,17 +2547,7 @@ function! s:RepetetionToDates(what)
 	call setqflist(expanded) | copen
 endfunction
 
-function! s:GrepOccurences(path)
-	" get line
-	let line = getline(".")
-	" only notes or tasks
-	if s:IsLineNote(line) == v:false && s:IsLineTask(line) == v:false
-		return
-	endif
-	" get id
-	let id = s:ExtractId(line)
-	" pattern
-	let pattern = '\b0x'.id.'\b'
+function! s:GrepOccurences(path, pattern)
 	" save options
 	call vimdoit_utility#SaveOptions()
 	" save cwd
@@ -2569,11 +2559,54 @@ function! s:GrepOccurences(path)
 	" modify grep format
 	set grepformat^=%f:%l:%c:%m
 	" execute
-	silent execute 'grep! '.shellescape(pattern) | copen
+	silent execute 'grep! '.shellescape(a:pattern) | copen
 	" restore cwd
 	execute "cd ".cwd_save
 	" restore options
 	call vimdoit_utility#RestoreOptions()
+endfunction
+
+function! s:GrepId(path)
+	" get line
+	let line = getline(".")
+	" only notes or tasks
+	if s:IsLineNote(line) == v:false && s:IsLineTask(line) == v:false
+		return
+	endif
+	" get id
+	let pattern = '\b0x'.escape(escape(s:ExtractId(line), '|'), '|').'\b'
+	" grep call
+	call s:GrepOccurences(a:path, pattern)
+endfunction
+
+function! s:GrepBlock()
+	" get line
+	let line = getline(".")
+	" only notes or tasks
+	if s:IsLineNote(line) == v:false && s:IsLineTask(line) == v:false
+		return
+	endif
+	" get block-id(s)
+	let blockids = s:ExtractWaiting(line)
+	call map(blockids, '"\\b0x".escape(escape(v:val, "|"), "|")."\\b"')
+	" build pattern
+	let pattern = join(blockids, '\|')
+	" grep call
+	call s:GrepOccurences(g:vimdoit_projectsdir, pattern)
+endfunction
+
+function! s:GrepWaiting()
+	" get line
+	let line = getline(".")
+	" only notes or tasks
+	if s:IsLineNote(line) == v:false && s:IsLineTask(line) == v:false
+		return
+	endif
+	" get id
+	let pattern = '\s+~'.escape(escape(s:ExtractId(line), '|'), '|').'\b'
+	echom pattern
+	" grep call
+	call s:GrepOccurences(g:vimdoit_projectsdir, pattern)
 endfunction
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -3981,18 +4014,14 @@ endfunction
 function! s:RemoveSpecialTags(lines)
 	for lnum in a:lines
 		let line = getline(lnum)
-		echom line
-		
 		" check if line is task or note
 		if s:IsLineNote(line) == v:false && s:IsLineTask(line) == v:false
 			echoerr "No line or task in line ".lnum
 			return
 		endif
-	
-		let task       = s:ExtractLineData(line)
+		let task = s:ExtractLineData(line)
 		call s:FilterSpecialTags(task['tags'])
 		call s:ReplaceLineWithTask(task, lnum)
-	
 	endfor
 endfunction
 
@@ -4691,9 +4720,14 @@ function! s:LoadMappings()
 		nnoremap <leader>or	:<c-u>call <SID>GTDView('root')<cr>
 		nnoremap <leader>oq	:<c-u>call <SID>GTDView('quickfix')<cr>
 
-		" check if current line is scheduled
-		nnoremap <leader>gs	:<c-u>call <SID>GrepOccurences(g:vimdoit_projectsdir.'/todo')<cr>
-		nnoremap <leader>go	:<c-u>call <SID>GrepOccurences(g:vimdoit_projectsdir.'/')<cr>
+		" check if current line is scheduled (grep-scheduled)
+		nnoremap <leader>gs	:<c-u>call <SID>GrepId(g:vimdoit_projectsdir.'/todo')<cr>
+		" grep occurences
+		nnoremap <leader>go	:<c-u>call <SID>GrepId(g:vimdoit_projectsdir.'/')<cr>
+		" get all tasks the current line is blocked by (grep block)
+		nnoremap <leader>gb	:<c-u>call <SID>GrepBlock()<cr>
+		" get all tasks the current line is blocking (grep waiting)
+		nnoremap <leader>gw	:<c-u>call <SID>GrepWaiting()<cr>
 
 		" insert task below the current line
 		nnoremap t	o- [ ] 
