@@ -9,6 +9,8 @@ Progress: 74.57%
 - [ ] Grep TODOs
 - [ ] IMPLEMENT: yanking of a task wont copy the tags `#next` and `#cur`
 - [ ] IMPLEMENT: propagating changes wont overwrite the tags `#next` and `#cur`
+- [ ] FIX: Sorting by priority in `grep backlog` won't consider the priorities of the projects
+	- NOT WORKING: WORKAROUND: grep tasks and then filter by backlog
 
 ------------------------------------------------------------------------------
 <OLD>
