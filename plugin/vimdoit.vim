@@ -2354,6 +2354,8 @@ function! s:GenerateTasks(dates, line)
 endfunction
 
 function! s:ExpandRepetitions(repetitions, extended_ids, limit)
+	echom "Expanding repetitions..."
+	
 	let list = []
 
 	for rep in a:repetitions
@@ -2387,6 +2389,7 @@ function! s:ExpandRepetitions(repetitions, extended_ids, limit)
 		endfor
 	endfor
 
+	echom "...done"
 	return list
 endfunction
 
@@ -2426,6 +2429,62 @@ function! s:GetFilesOfQfList()
 	endfor
 	
 	return uniq(sort(list))
+endfunction
+
+command! R2D :call s:R2D('all')
+" will expand repetitions
+" does not care about already existing auto-generated dates
+" might cause id-collisions with other auto-generated dates
+function! s:RepetetionToDates(what)
+	" decide which lines should be processed
+	if a:what ==# 'all'
+		" all lines of file
+		let lines = range(1, line('$')) 
+		echom "Expanding repetitions of file ".expand('%')
+	elseif a:what ==# 'visual'
+		" lines of current visual selection
+		let lines = range(line("'<"), line("'>"))
+		echom "Expanding repetitions of line ".join(lines, ',')." of file ".expand('%')
+	elseif a:what ==# 'current'
+		" only current line
+		let lines = [ line('.') ]
+		echom "Expanding Repetitionso of line ".join(lines, ',')." of file ".expand('%')
+	else
+		echoerr "Unknown argument for `a:what` :".a:what
+	endif
+	
+	try
+		" syntax check
+		call s:ValidateSyntax(lines)
+		" id check
+		call s:ValidateId(lines)
+		" re-build line
+		call s:RebuiltLine(lines)
+	catch /.*/
+		echoerr v:exception." in ".v:throwpoint
+		return
+	endtry
+
+	let reps = []
+	for lnum in lines
+		let line = getline(lnum)
+		
+		" only notes or tasks
+		if s:IsLineNote(line) == v:false && s:IsLineTask(line) == v:false
+			call filter(lines, 'v:val !=# '.lnum)
+		endif
+		
+		" only repetitions
+		if s:HasLineRepetition(line) == v:false
+			call filter(lines, 'v:val !=# '.lnum)
+		endif
+		
+		" build qf-like datastructure
+		call add(reps, { 'bufnr' : bufnr(), 'lnum' : lnum, 'text' : line })
+	endfor
+
+	let expanded = s:ExpandRepetitions(reps, [], '')
+	call setqflist(expanded) | copen
 endfunction
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -3974,6 +4033,36 @@ function! s:YankTaskPrompt()
 	endif
 endfunction
 
+function! s:YankFromQf(what)
+
+	if exists('w:quickfix_title') == v:false
+		echom "Not a quickfix window. Abort."
+		return
+	endif
+	
+	if a:what ==# 'all'
+		" all lines of file
+		let lines = range(1, line('$')) 
+	elseif a:what ==# 'visual'
+		" lines of current visual selection
+		let lines = range(line("'<"), line("'>"))
+	elseif a:what ==# 'current'
+		" only current line
+		let lines = [ line('.') ]
+	else
+		echoerr "Unknown argument for `a:what` :".a:what
+	endif
+
+	let toyank = []
+	for lnum in lines	
+		let str = substitute(getline(lnum), '\v^.{-}\|', '', '')
+		let str = trim(substitute(str, '\v^.{-}\|', '', ''))
+		call add(toyank, str)
+	endfor
+
+	let @+ = join(toyank, "\n")
+endfunction
+
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 "												String/Line Manipulation 												"
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -4286,7 +4375,6 @@ function! s:ValidateSyntax(lines)
 	
 endfunction
 
-
 function! s:ValidateId(lines)
 	echom "Validating ids"
 	for lnum in a:lines
@@ -4464,6 +4552,12 @@ function! s:LoadMappings()
 		
 		" Yank Task Prompt (Normal)
 		nnoremap Y	:<c-u>call <SID>YankTaskPrompt()<cr>
+		" yank from quickfix list
+		nnoremap <leader>yy	:<c-u>call <SID>YankFromQf('current')<cr>
+		" yank from quickfix list (all)
+		nnoremap <leader>YY	:<c-u>call <SID>YankFromQf('all')<cr>
+		" yank from quickfix list (visual)
+		vnoremap <leader>yy	:<c-u>call <SID>YankFromQf('visual')<cr>
 
 		" process current line
 		nnoremap <leader>v	:<c-u>call <SID>ProcessFile('current')<cr>
@@ -4471,6 +4565,13 @@ function! s:LoadMappings()
 		vnoremap <leader>v	:<c-u>call <SID>ProcessFile('visual')<cr>
 		" process whole file
 		nnoremap <leader>V	:<c-u>call <SID>ProcessFile('all')<cr>
+
+		" expand repetition of current line
+		nnoremap <leader>r2d	:<c-u>call <SID>RepetetionToDates('current')<cr>
+		" expand repetition of current visual selection
+		vnoremap <leader>r2d	:<c-u>call <SID>RepetetionToDates('visual')<cr>
+		" expand repetitions of current file
+		nnoremap <leader>r2D	:<c-u>call <SID>RepetetionToDates('all')<cr>
 
 		" create empty project in current directory
 		nnoremap <leader>np	:<c-u>call <SID>NewProject()<cr>
@@ -4483,6 +4584,8 @@ function! s:LoadMappings()
 
 		" insert task below the current line
 		nnoremap t	o- [ ] 
+		" insert tasks in the current line
+		inoremap tж - [ ] 
 		
 		echom "Mappings loaded"
 		let b:vimdoit_did_load_mappings = 1
