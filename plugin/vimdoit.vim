@@ -364,7 +364,7 @@ function! s:SymlinkProjects()
 	call s:Symlink(source, target)
 	" dienstag
 	let name   = 'dienstag'
-	let date   = trim(system('dateround today dienstag'))
+	let date   = trim(system('dateround today tuesday'))
 	let year   = trim(system('date +%Y --date '.shellescape(date)))
 	let source = g:vimdoit_projectsdir.'/todo/'.year.'/'.tolower(date).'.vdo'
 	let target = g:vimdoit_projectsdir.'/todo/'.name.'.vdo'
@@ -428,27 +428,30 @@ function! s:SymlinkProjects()
 	let target = g:vimdoit_projectsdir.'/todo/'.name.'.vdo'
 	call s:Symlink(source, target)
 	" dieser monat
-	let name   = 'dieser-monat'
-	let month   = strftime('%B')
-	let year   = trim(system('date +%Y'))
-	let source = g:vimdoit_projectsdir.'/todo/'.year.'/kw-'.tolower(month).'.vdo'
-	let target = g:vimdoit_projectsdir.'/todo/'.name.'.vdo'
+	let name      = 'dieser-monat'
+	let month     = strftime('%B')
+	let month_num = trim(system('date +%m'))
+	let year      = trim(system('date +%Y'))
+	let source    = g:vimdoit_projectsdir.'/todo/'.year.'/'.month_num.'-'.tolower(month).'.vdo'
+	let target    = g:vimdoit_projectsdir.'/todo/'.name.'.vdo'
 	call s:Symlink(source, target)
 	" naechster monat
 	let name   = 'naechster-monat'
-	let date   = trim(system('dateadd today +1mo'))
-	let month   = trim(system('date +%B --date '.shellescape(date)))
-	let year   = trim(system('date +%Y --date '.shellescape(date)))
-	let source = g:vimdoit_projectsdir.'/todo/'.year.'/kw-'.tolower(month).'.vdo'
+	let date      = trim(system('dateadd today +1mo'))
+	let month     = trim(system('date +%B --date '.shellescape(date)))
+	let month_num = trim(system('date +%m --date '.shellescape(date)))
+	let year      = trim(system('date +%Y --date '.shellescape(date)))
+	let source = g:vimdoit_projectsdir.'/todo/'.year.'/'.month_num.'-'.tolower(month).'.vdo'
 	let target = g:vimdoit_projectsdir.'/todo/'.name.'.vdo'
 	call s:Symlink(source, target)
 	" letzter monat
-	let name   = 'letzter-monat'
-	let date   = trim(system('dateadd today -1mo'))
-	let month   = trim(system('date +%B --date '.shellescape(date)))
-	let year   = trim(system('date +%Y --date '.shellescape(date)))
-	let source = g:vimdoit_projectsdir.'/todo/'.year.'/kw-'.tolower(month).'.vdo'
-	let target = g:vimdoit_projectsdir.'/todo/'.name.'.vdo'
+	let name      = 'letzter-monat'
+	let date      = trim(system('dateadd today -1mo'))
+	let month     = trim(system('date +%B --date '.shellescape(date)))
+	let month_num = trim(system('date +%m --date '.shellescape(date)))
+	let year      = trim(system('date +%Y --date '.shellescape(date)))
+	let source    = g:vimdoit_projectsdir.'/todo/'.year.'/'.month_num.'-'.tolower(month).'.vdo'
+	let target    = g:vimdoit_projectsdir.'/todo/'.name.'.vdo'
 	call s:Symlink(source, target)
 endfunction
 
@@ -1514,6 +1517,11 @@ function! s:ExtractPriority(line)
 	return len(priority)
 endfunction
 
+function! s:GetLinePriority(line)
+	let prio = s:ExtractPriority(a:line)
+	return prio == 0 ? 1 : prio
+endfunction
+
 command! Prio :echom s:GetProjectPriority(bufnr())
 function! s:GetProjectPriority(bufnr)
 
@@ -1960,7 +1968,7 @@ function! s:SortPrompt()
 endfunction
 
 function! s:CmpQfByPriority(e1, e2)
-	let [t1, t2] = [s:ExtractPriority(a:e1['text']), s:ExtractPriority(a:e2['text'])]
+	let [t1, t2] = [s:GetLinePriority(a:e1['text']), s:GetLinePriority(a:e2['text'])]
 	let [p1, p2] = [s:GetProjectPriority(a:e1['bufnr']), s:GetProjectPriority(a:e2['bufnr'])]
 	let pr1 = t1 * p1
 	let pr2 = t2 * p2
@@ -2537,6 +2545,35 @@ function! s:RepetetionToDates(what)
 
 	let expanded = s:ExpandRepetitions(reps, [], '')
 	call setqflist(expanded) | copen
+endfunction
+
+function! s:GrepOccurences(path)
+	" get line
+	let line = getline(".")
+	" only notes or tasks
+	if s:IsLineNote(line) == v:false && s:IsLineTask(line) == v:false
+		return
+	endif
+	" get id
+	let id = s:ExtractId(line)
+	" pattern
+	let pattern = '\b0x'.id.'\b'
+	" save options
+	call vimdoit_utility#SaveOptions()
+	" save cwd
+	let cwd_save = getcwd()
+	" change cd
+	execute "cd ".a:path
+	" modify grep-program
+	let &grepprg='rg --vimgrep --type-add "vimdoit:*.vdo" -t vimdoit '
+	" modify grep format
+	set grepformat^=%f:%l:%c:%m
+	" execute
+	silent execute 'grep! '.shellescape(pattern) | copen
+	" restore cwd
+	execute "cd ".cwd_save
+	" restore options
+	call vimdoit_utility#RestoreOptions()
 endfunction
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -4622,7 +4659,7 @@ function! s:LoadMappings()
 		" Jump in Quickfix List to Today
 		nnoremap <leader>qj	:<c-u>call <SID>JumpToToday()<cr>
 		
-		" Yank Task Prompt (Normal)
+		" yank Task Prompt (Normal)
 		nnoremap Y	:<c-u>call <SID>YankTaskPrompt()<cr>
 		" yank from quickfix list
 		nnoremap <leader>yy	:<c-u>call <SID>YankFromQf('current')<cr>
@@ -4653,6 +4690,10 @@ function! s:LoadMappings()
 		nnoremap <leader>o.	:<c-u>call <SID>GTDView('area')<cr>
 		nnoremap <leader>or	:<c-u>call <SID>GTDView('root')<cr>
 		nnoremap <leader>oq	:<c-u>call <SID>GTDView('quickfix')<cr>
+
+		" check if current line is scheduled
+		nnoremap <leader>gs	:<c-u>call <SID>GrepOccurences(g:vimdoit_projectsdir.'/todo')<cr>
+		nnoremap <leader>go	:<c-u>call <SID>GrepOccurences(g:vimdoit_projectsdir.'/')<cr>
 
 		" insert task below the current line
 		nnoremap t	o- [ ] 
